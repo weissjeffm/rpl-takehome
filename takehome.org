@@ -38,3 +38,139 @@
 + The example below contains all functionality you need to implement.
 + It should be possible to shadow vars (naming a new local the name of an existing
   variable).
+*** Example invocation
+#+begin_src clojure
+(defstackfn f
+  [!a !b !c] ; example uses input: 1 2 4. Stack starts empty.
+  !a ; 1
+  !b ; 1 2
+  (invoke> + 2) ; 3
+  !v1+ ; 3
+  !c ; 3 4
+  !c ; 3 4 4
+  <pop> ; 3 4
+  2 ; 3 4 2
+  (invoke> * 2) ; 3 8
+  !v2+ ; 3 8
+  (invoke> = 2) ; false
+  (if> ; stack empty
+      !v1
+    !v2
+    (invoke> - 2)
+    else>
+    "false!!" ;; "false!!"
+    (invoke> println 1) ; nil
+    <pop> ; stack empty
+    !v1 ; 3
+    !v2 ; 3 8
+    (invoke> * 2) ; 24
+    )
+  )
+;; (f 1 2 4) prints "false!!" and returns 24
+#+end_src
+
+** Implementation
+*** Project file
+#+begin_src clojure :tangle project.clj
+(defproject redplanetlabs "0.1.0-SNAPSHOT"
+  :description "FIXME: write description"
+  :url "http://example.com/FIXME"
+  :license {:name "EPL-2.0 OR GPL-2.0-or-later WITH Classpath-exception-2.0"
+            :url "https://www.eclipse.org/legal/epl-2.0/"}
+  :dependencies [[org.clojure/clojure "1.10.0"]]
+  :repl-options {:init-ns redplanetlabs.core})
+#+end_src
+*** Data structures
+Our interpreter will need to keep track of two things:
++ the stack
++ variables
+
+The stack is easily implemented as a clojure list, and the variables
+can be a map with symbol keys.
+
+#+begin_src clojure tangle src/redplanetlabs/core.clj
+(ns redplanetlabs.core)
+
+(defrecord State [stack vars])
+
+(defn new-state []
+  (State. (list) {}))
+#+end_src
+
+#+RESULTS:
+| redplanetlabs.core.State       |
+| #'redplanetlabs.core/new-state |
+
+*** Parsing
+We'll need to be able to determine which symbols are meant to put
+variable values on the stack vs put constants on the stack or set
+variables.
+
+#+begin_src clojure tangle src/redplanetlabs/core.clj
+;; needs to also return whether there's a +
+(defn get-var
+  "Returns a pair or nil. In the pair, the first item is a symbol for
+   the variable being referred to (either a get '!v' or set '!v+'
+   operation). The second item is a boolean, true for a 'set'
+   operation and false for a 'get' operation. Returns nil if it's not
+   a proper reference.
+
+   eg !v => [v false], !v+ => [v true], v => nil"
+
+  [sym]
+  (let [[_ var set?] (re-find #"^!([^+]+)(\+?)$" (name sym))
+        set? (boolean (seq set?))]
+    (and var [var set?])))
+
+(defn compile-constant
+  "Pushes the constant onto the stack"
+  [state constant]
+  `(update ~state :stack conj ~constant))
+
+(defn compile-pop
+  "Pops the stack (and the value is discarded)"
+  [state]
+  `(update ~state :stack rest)) 
+
+(defn var-lookup
+  "Returns the value of a variable or throws exception if it doesn't
+  exist"
+  [state v]
+  (-> state
+      :vars
+      (get v)
+      (or (throw (Exception.
+                  (format "Variable does not exist: %s", (name v)))))))
+
+(defn compile-symbol
+  "Handles symbols (variable get/set, pop)"
+  [state sym]
+  (if (= sym '<pop>)
+    (compile-pop state)
+    (if-let [var (get-var sym)]
+      (let [[var set?] var]
+        (if set?
+          `(update ~state :vars assoc (quote ~var)
+                   (-> ~state :stack peek) )
+          `(update ~state :stack conj (var-lookup ~state (quote ~sym)))))
+      (throw (Exception. (format "Unknown variable or symbol: %s", (name sym)))))))
+
+(defn compile-list
+  [state item] nil)
+
+(defn compile-item
+  "Returns a code snippet that executes the given item inside a
+  defstackfn. current-code is the existing code that we will wrap"
+  [state item]
+  (cond
+    (list? item) (compile-list state item)
+    (symbol? item) (compile-symbol state item)
+    true (compile-constant state item)))
+
+(defn compile-program
+  [program]
+  (let [state (gensym)]
+    `(let [~state (new-state)]
+       (-> ~@(for [item program]
+               (compile-item state item))))))
+#+end_src
