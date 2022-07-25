@@ -108,7 +108,7 @@ variables.
 
 #+begin_src clojure tangle src/redplanetlabs/core.clj
 ;; needs to also return whether there's a +
-(defn get-var
+(defn get-var-key
   "Returns a pair or nil. In the pair, the first item is a symbol for
    the variable being referred to (either a get '!v' or set '!v+'
    operation). The second item is a boolean, true for a 'set'
@@ -120,39 +120,53 @@ variables.
   [sym]
   (let [[_ var set?] (re-find #"^!([^+]+)(\+?)$" (name sym))
         set? (boolean (seq set?))]
-    (and var [var set?])))
+    (and var [(symbol var) set?])))
+
+(defn push
+  [state val]
+  (update state :stack conj val))
 
 (defn compile-constant
   "Pushes the constant onto the stack"
-  [state constant]
-  `(update ~state :stack conj ~constant))
-
-(defn compile-pop
-  "Pops the stack (and the value is discarded)"
-  [state]
-  `(update ~state :stack rest)) 
+  [constant]
+  `(push ~constant))
 
 (defn var-lookup
   "Returns the value of a variable or throws exception if it doesn't
   exist"
   [state v]
+  (println state)
   (-> state
       :vars
       (get v)
       (or (throw (Exception.
                   (format "Variable does not exist: %s", (name v)))))))
 
+(defn set-var
+  "Sets the variable var with the value currently on top of
+  stack (tos). Does not change the stack."
+  [{:keys [stack] :as state} var]
+  (if-let [tos (first stack)]
+    (do (println state)(update state :vars assoc var tos))
+    (-> "Stack underflow setting variable: %s"
+        (format (name var))
+        Exception.
+        throw)))
+
+(defn get-var
+  "Gets the variable var and pushes it onto the stack."
+  [{:keys [vars] :as state} var]
+  (let [v (var-lookup state var)]
+    (update state :stack conj v)))
+
 (defn compile-symbol
   "Handles symbols (variable get/set, pop)"
-  [state sym]
+  [sym]
   (if (= sym '<pop>)
-    (compile-pop state)
-    (if-let [var (get-var sym)]
+    `(update :stack rest)
+    (if-let [var (get-var-key sym)]
       (let [[var set?] var]
-        (if set?
-          `(update ~state :vars assoc (quote ~var)
-                   (-> ~state :stack peek) )
-          `(update ~state :stack conj (var-lookup ~state (quote ~sym)))))
+        `(~(if set? 'set-var 'get-var) (quote ~var)))
       (throw (Exception. (format "Unknown variable or symbol: %s", (name sym)))))))
 
 (defn compile-list
@@ -161,16 +175,28 @@ variables.
 (defn compile-item
   "Returns a code snippet that executes the given item inside a
   defstackfn. current-code is the existing code that we will wrap"
-  [state item]
+  [item]
   (cond
-    (list? item) (compile-list state item)
-    (symbol? item) (compile-symbol state item)
-    true (compile-constant state item)))
+    (list? item) (compile-list item)
+    (symbol? item) (compile-symbol item)
+    true (compile-constant item)))
 
 (defn compile-program
   [program]
   (let [state (gensym)]
     `(let [~state (new-state)]
-       (-> ~@(for [item program]
-               (compile-item state item))))))
+       (-> ~state
+           ~@(for [item program]
+               (compile-item item))))))
 #+end_src
+
+#+RESULTS:
+| #'redplanetlabs.core/get-var-key      |
+| #'redplanetlabs.core/compile-constant |
+| #'redplanetlabs.core/var-lookup       |
+| #'redplanetlabs.core/set-var          |
+| #'redplanetlabs.core/get-var          |
+| #'redplanetlabs.core/compile-symbol   |
+| #'redplanetlabs.core/compile-list     |
+| #'redplanetlabs.core/compile-item     |
+| #'redplanetlabs.core/compile-program  |
