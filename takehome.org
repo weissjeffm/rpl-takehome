@@ -54,7 +54,7 @@
   !v2+ ; 3 8
   (invoke> = 2) ; false
   (if> ; stack empty
-      !v1
+    !v1
     !v2
     (invoke> - 2)
     else>
@@ -107,7 +107,6 @@ variable values on the stack vs put constants on the stack or set
 variables.
 
 #+begin_src clojure tangle src/redplanetlabs/core.clj
-;; needs to also return whether there's a +
 (defn get-var-key
   "Returns a pair or nil. In the pair, the first item is a symbol for
    the variable being referred to (either a get '!v' or set '!v+'
@@ -123,6 +122,7 @@ variables.
     (and var [(symbol var) set?])))
 
 (defn push
+  "Push val onto the stack, return the state"
   [state val]
   (update state :stack conj val))
 
@@ -131,29 +131,28 @@ variables.
   [constant]
   `(push ~constant))
 
+(defn throw-error
+  "Throws an exception with the format args applied to the given
+   format-string as the message"
+  [fmt-str & fmt-args]
+  (throw (Exception. (apply format fmt-str fmt-args))))
+
 (defn var-lookup
   "Returns the value of a variable or throws exception if it doesn't
   exist"
   [state v]
-  (println state)
   (-> state
       :vars
       (get v)
-      (or (-> "Variable does not exist: %s"
-              (format, (name v))
-              Exception.
-              throw))))
+      (or (throw-error "Variable does not exist: %s" (name v)))))
 
 (defn set-var
   "Sets the variable var with the value currently on top of
   stack (tos). Does not change the stack."
   [{:keys [stack] :as state} var]
   (if-let [tos (first stack)]
-    (do (println state)(update state :vars assoc var tos))
-    (-> "Stack underflow setting variable: %s"
-        (format (name var))
-        Exception.
-        throw)))
+    (update state :vars assoc var tos)
+    (throw-error "Stack underflow setting variable: %s" (name var))))
 
 (defn get-var
   "Gets the variable var and pushes it onto the stack."
@@ -169,66 +168,101 @@ variables.
     (if-let [var (get-var-key sym)]
       (let [[var set?] var]
         `(~(if set? 'set-var 'get-var) (quote ~var)))
-      (-> "Unknown variable or symbol: %s"
-          (format, (name sym))
-          Exception.
-          throw))))
+      (throw-error "Unknown variable or symbol: %s" (name sym)))))
 
-(defn invoke [{:keys [stack] :as state} f arity]
+(defn invoke
+  "Calls f with args taken from the top of the stack. Arity sets the
+  number of args to take from the stack. Throws an exception if there
+  aren't enough args on the stack."
+  [{:keys [stack] :as state} f arity]
   (let [[args stack] (split-at arity stack)]
+    (when (not= (count args) arity)
+      (throw-error "Stack underflow calling %s" f))
     (->> args
          reverse ;; make the ToS the last argument to the function, so
-                 ;; that we can write '3 2 -' and get 1 instead of -1
+         ;; that we can write '3 2 -' and get 1 instead of -1
          (apply f)
          (conj stack)
          (assoc state :stack))))
 
 (defn compile-invoke
+  "Emits code for invoke>"
   [[f arity]]
-  (if-not (and (number? arity) (pos? arity))
-    (-> "Invalid arity: %s" (format arity) Exception. throw))
-  (if-not (and (symbol? f) (resolve f))
-    (-> "Invalid invocation, function doesn't resolve: %s"
-        (format (name f)) Exception. throw))
+  (when-not (and (number? arity) (pos? arity))
+    (throw-error "Invalid arity: %s"  arity))
+  (when-not (symbol? f)
+    (throw-error "Invalid invocation, function must be a symbol"
+                 (str f)))
   `(invoke ~f ~arity))
 
-(defn compile-if [s] nil)
+(defmacro threaded-if
+  "Expands an expression that expects state inserted as the first arg
+   to a let/if that returns the new state"
+  [state if-clause else-clause]
+  `(let [tos# (-> ~state :stack first)
+         newstate# (update ~state :stack pop)]
+     (if tos#
+       (-> newstate# ~@if-clause)
+       (-> newstate# ~@else-clause))))
+
+(defn compile-if
+  "Emits code for if> else>"
+  [items]
+  (let [[if-clause [_ & else-clause]] (split-with #(not= % 'else>) items)
+        compiled-if (map compile-item if-clause)
+        compiled-else (map compile-item else-clause)]
+    `(threaded-if ~compiled-if ~compiled-else)))
 
 (defn compile-list
   [[function & args]]
   (case function
     if> (compile-if args)
     invoke> (compile-invoke args)
-    (-> "Unknown function: %s"
-        (format function)
-        Exception.
-        throw)))
+    (throw-error "Unknown function: %s" function)))
 
 (defn compile-item
   "Returns a code snippet that executes the given item inside a
-  defstackfn. current-code is the existing code that we will wrap"
+  defstackfn. the form is always one that fits into the -> macro. In
+  other words, the first argument to whatever function is called is
+  left out. It will be filled in inside the -> macro with a form that
+  returns the state that this item needs."
   [item]
   (cond
     (list? item) (compile-list item)
     (symbol? item) (compile-symbol item)
     true (compile-constant item)))
 
-(defn compile-program
-  [program]
-  (let [state (gensym)]
-    `(let [~state (new-state)]
-       (-> ~state
-           ~@(for [item program]
-               (compile-item item))))))
+(defn assign-initial-vars
+  [state vars values]
+  (let [;; discard the leading ! from var names
+        vars (map (comp first get-var-key) vars)
+        ;; match up var names to args (discarding anything leftover)
+        kvs (map vector vars values)]
+    (update state :vars merge (into {} kvs))))
+
+(defmacro defstackfn
+  [name-sym initial-vars & program]
+  `(defn ~name-sym [& args#]
+     (-> (new-state)
+         (assign-initial-vars (quote ~initial-vars) args#)
+         ~@(for [item program]
+             (compile-item item)))))
 #+end_src
 
 #+RESULTS:
-| #'redplanetlabs.core/get-var-key      |
-| #'redplanetlabs.core/compile-constant |
-| #'redplanetlabs.core/var-lookup       |
-| #'redplanetlabs.core/set-var          |
-| #'redplanetlabs.core/get-var          |
-| #'redplanetlabs.core/compile-symbol   |
-| #'redplanetlabs.core/compile-list     |
-| #'redplanetlabs.core/compile-item     |
-| #'redplanetlabs.core/compile-program  |
+| #'redplanetlabs.core/get-var-key         |
+| #'redplanetlabs.core/push                |
+| #'redplanetlabs.core/compile-constant    |
+| #'redplanetlabs.core/throw-error         |
+| #'redplanetlabs.core/var-lookup          |
+| #'redplanetlabs.core/set-var             |
+| #'redplanetlabs.core/get-var             |
+| #'redplanetlabs.core/compile-symbol      |
+| #'redplanetlabs.core/invoke              |
+| #'redplanetlabs.core/compile-invoke      |
+| #'redplanetlabs.core/threaded-if         |
+| #'redplanetlabs.core/compile-if          |
+| #'redplanetlabs.core/compile-list        |
+| #'redplanetlabs.core/compile-item        |
+| #'redplanetlabs.core/assign-initial-vars |
+| #'redplanetlabs.core/defstackfn          |
