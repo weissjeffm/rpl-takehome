@@ -139,8 +139,10 @@ variables.
   (-> state
       :vars
       (get v)
-      (or (throw (Exception.
-                  (format "Variable does not exist: %s", (name v)))))))
+      (or (-> "Variable does not exist: %s"
+              (format, (name v))
+              Exception.
+              throw))))
 
 (defn set-var
   "Sets the variable var with the value currently on top of
@@ -167,10 +169,40 @@ variables.
     (if-let [var (get-var-key sym)]
       (let [[var set?] var]
         `(~(if set? 'set-var 'get-var) (quote ~var)))
-      (throw (Exception. (format "Unknown variable or symbol: %s", (name sym)))))))
+      (-> "Unknown variable or symbol: %s"
+          (format, (name sym))
+          Exception.
+          throw))))
+
+(defn invoke [{:keys [stack] :as state} f arity]
+  (let [[args stack] (split-at arity stack)]
+    (->> args
+         reverse ;; make the ToS the last argument to the function, so
+                 ;; that we can write '3 2 -' and get 1 instead of -1
+         (apply f)
+         (conj stack)
+         (assoc state :stack))))
+
+(defn compile-invoke
+  [[f arity]]
+  (if-not (and (number? arity) (pos? arity))
+    (-> "Invalid arity: %s" (format arity) Exception. throw))
+  (if-not (and (symbol? f) (resolve f))
+    (-> "Invalid invocation, function doesn't resolve: %s"
+        (format (name f)) Exception. throw))
+  `(invoke ~f ~arity))
+
+(defn compile-if [s] nil)
 
 (defn compile-list
-  [state item] nil)
+  [[function & args]]
+  (case function
+    if> (compile-if args)
+    invoke> (compile-invoke args)
+    (-> "Unknown function: %s"
+        (format function)
+        Exception.
+        throw)))
 
 (defn compile-item
   "Returns a code snippet that executes the given item inside a
