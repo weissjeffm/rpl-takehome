@@ -81,10 +81,9 @@ within an =if>= block would be pretty trivial, as the compiled form
 still has access to the original variable values, and could return
 those as part of the resulting state instead of whatever was created
 in the =if>= block. As to which is the better design, it's hard to say
-given the extreme simplicity of the language. Scoping is definitely
-not strictly needed, since the stack is available and it also allows
-you to have inner code place values on top of values created by outer
-code.
+given the extreme simplicity of the language. Scoping is not strictly
+needed - the stack provides a similar ability to shadow values (by
+placing a new value on ToS and later popping it off).
 ** Implementation
 *** Project file
 #+begin_src clojure :tangle project.clj
