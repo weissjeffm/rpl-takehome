@@ -66,7 +66,7 @@
     `(update :stack rest)
     (if-let [var (parse-var-reference sym)]
       (let [[var set?] var]
-        `(~(if set? 'set-var 'get-var) (quote ~var)))
+        `(~(if set? `set-var `get-var) (quote ~var)))
       (throw-error "Unknown variable or symbol: %s" (name sym)))))
 
 (defn invoke
@@ -104,6 +104,8 @@
      (if tos#
        (-> newstate# ~@if-clause)
        (-> newstate# ~@else-clause))))
+
+(declare compile-item)
 
 (defn compile-if
   "Emits code for if> else>"

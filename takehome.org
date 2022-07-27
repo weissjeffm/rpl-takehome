@@ -69,17 +69,22 @@
 ;; (f 1 2 4) prints "false!!" and returns 24
 #+end_src
 ** Design
+*** Basic approach
 We'll compile the various statements into forms. Each successive form
 will have the state threaded through it with the =->= macro, and its
 result will be a new state. We'll wrap a function definition around
 that.
-
+*** Variable shadowing
 For now there is no variable scoping, and therefore setting a variable
 twice will result in clobbering the previous value. Adding scoping
 within an =if>= block would be pretty trivial, as the compiled form
 still has access to the original variable values, and could return
 those as part of the resulting state instead of whatever was created
-in the =if>= block.
+in the =if>= block. As to which is the better design, it's hard to say
+given the extreme simplicity of the language. Scoping is definitely
+not strictly needed, since the stack is available and it also allows
+you to have inner code place values on top of values created by outer
+code.
 ** Implementation
 *** Project file
 #+begin_src clojure :tangle project.clj
@@ -110,6 +115,9 @@ variables (with decorations =!= and =+= stripped).
 #+end_src
 
 *** Compiler functions and runtime functions
+There are functions that create clojure code from =defstackfn= items
+and functions that do the work at runtime. The runtime functions are
+sometimes trivial but make compiled code more readable. 
 #+begin_src clojure :tangle src/redplanetlabs/core.clj :results none
 (defn parse-var-reference
   "Returns a pair or nil. In the pair, the first item is a symbol for
@@ -172,7 +180,7 @@ variables (with decorations =!= and =+= stripped).
     `(update :stack rest)
     (if-let [var (parse-var-reference sym)]
       (let [[var set?] var]
-        `(~(if set? 'set-var 'get-var) (quote ~var)))
+        `(~(if set? `set-var `get-var) (quote ~var)))
       (throw-error "Unknown variable or symbol: %s" (name sym)))))
 
 (defn invoke
@@ -210,6 +218,8 @@ variables (with decorations =!= and =+= stripped).
      (if tos#
        (-> newstate# ~@if-clause)
        (-> newstate# ~@else-clause))))
+
+(declare compile-item)
 
 (defn compile-if
   "Emits code for if> else>"
@@ -263,5 +273,64 @@ variables (with decorations =!= and =+= stripped).
                  (assign-initial-vars (quote ~initial-vars) args#)
                  ~@(for [item program]
                      (compile-item item))))))
+#+end_src
+
+*** Tests
+#+begin_src clojure :tangle test/redplanetlabs/core_test.clj :results none
+(ns redplanetlabs.core-test
+  (:require [clojure.test :refer :all]
+            [redplanetlabs.core :as sut]))
+
+(sut/defstackfn example [!a !b !c] ; example uses input: 1 2 4. Stack starts empty.
+  !a ; 1
+  !b ; 1 2
+  (invoke> + 2) ; 3
+  !v1+ ; 3
+  !c ; 3 4
+  !c ; 3 4 4
+  <pop> ; 3 4
+  2 ; 3 4 2
+  (invoke> * 2) ; 3 8
+  !v2+ ; 3 8
+  (invoke> = 2) ; false
+  (if> ; stack empty
+      !v1
+    !v2
+    (invoke> - 2)
+    else>
+    "false!!" ;; "false!!"
+    (invoke> println 1) ; nil
+    <pop> ; stack empty
+    !v1 ; 3
+    !v2 ; 3 8
+    (invoke> * 2) ; 24
+    )
+  )
+
+(sut/defstackfn nested-if [!y]
+  !y !y
+  (invoke> pos? 1)
+  (if> !y
+    (invoke> even? 1)
+    (if> 3
+      (invoke> + 2)
+      else>
+      11
+      (invoke> * 2))
+    else> -99))
+
+(sut/defstackfn shadow [!x !y] !x !y !x+ !x)
+
+(deftest example-test
+  (is (= (example 1 2 4) '(24))))
+
+(deftest nested-if-test
+  (are [y exp] (= (nested-if y) exp)
+    4 '(7)
+    5 '(55)
+    -4  '(-99 -4)))
+
+(deftest shadow-test
+  (is (= (shadow 1 2) '(2 2 1))))
 #+end_src
 
