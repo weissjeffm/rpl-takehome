@@ -15,7 +15,7 @@
 #+STARTUP: showeverything
 
 * Clojure interpreter for stack-based DSL
-** Description
+** Problem statement
 *** Explanation of functionality
 + Variables are symbols prefixed with "!", e.g. !v
 + A stack function is defined with "defstackfn". The first argument is the input declaration
