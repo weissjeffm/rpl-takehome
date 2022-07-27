@@ -206,8 +206,8 @@ sometimes trivial but make compiled code more readable.
 (defn compile-invoke
   "Emits code for invoke>"
   [[f arity]]
-  (when-not (and (number? arity) (pos? arity))
-    (throw-error "Invalid arity: %s"  arity))
+  (when (or (not (integer? arity)) (neg? arity))
+    (throw-error "Invalid arity: %s" arity))
   (when-not (symbol? f)
     (throw-error "Invalid invocation, function must be a symbol"
                  (str f)))
