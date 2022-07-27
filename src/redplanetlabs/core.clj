@@ -160,7 +160,8 @@
   function. The function accepts a variable number of args."
   [name-sym initial-vars & program]
   `(defn ~name-sym [& args#]
-     (:stack (-> (new-state)
-                 (assign-initial-vars (quote ~initial-vars) args#)
-                 ~@(for [item program]
-                     (compile-item item))))))
+     (-> (new-state)
+         (assign-initial-vars (quote ~initial-vars) args#)
+         ~@(for [item program]
+             (compile-item item))
+         :stack)))
