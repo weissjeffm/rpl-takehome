@@ -162,6 +162,5 @@
   `(defn ~name-sym [& args#]
      (-> (new-state)
          (assign-initial-vars (quote ~initial-vars) args#)
-         ~@(for [item program]
-             (compile-item item))
+         ~@(map compile-item program)
          :stack)))
