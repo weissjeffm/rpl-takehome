@@ -68,7 +68,18 @@
   )
 ;; (f 1 2 4) prints "false!!" and returns 24
 #+end_src
+** Design
+We'll compile the various statements into forms. Each successive form
+will have the state threaded through it with the =->= macro, and its
+result will be a new state. We'll wrap a function definition around
+that.
 
+For now there is no variable scoping, and therefore setting a variable
+twice will result in clobbering the previous value. Adding scoping
+within an =if>= block would be pretty trivial, as the compiled form
+still has access to the original variable values, and could return
+those as part of the resulting state instead of whatever was created
+in the =if>= block.
 ** Implementation
 *** Project file
 #+begin_src clojure :tangle project.clj
@@ -86,9 +97,10 @@ Our interpreter will need to keep track of two things:
 + variables
 
 The stack is easily implemented as a clojure list, and the variables
-can be a map with symbol keys.
+can be a map with symbol keys. The symbols will be the names of the
+variables (with decorations =!= and =+= stripped).
 
-#+begin_src clojure tangle src/redplanetlabs/core.clj
+#+begin_src clojure :tangle src/redplanetlabs/core.clj :results none
 (ns redplanetlabs.core)
 
 (defrecord State [stack vars])
@@ -97,17 +109,9 @@ can be a map with symbol keys.
   (State. (list) {}))
 #+end_src
 
-#+RESULTS:
-| redplanetlabs.core.State       |
-| #'redplanetlabs.core/new-state |
-
-*** Parsing
-We'll need to be able to determine which symbols are meant to put
-variable values on the stack vs put constants on the stack or set
-variables.
-
-#+begin_src clojure tangle src/redplanetlabs/core.clj
-(defn get-var-key
+*** Compiler functions and runtime functions
+#+begin_src clojure :tangle src/redplanetlabs/core.clj :results none
+(defn parse-var-reference
   "Returns a pair or nil. In the pair, the first item is a symbol for
    the variable being referred to (either a get '!v' or set '!v+'
    operation). The second item is a boolean, true for a 'set'
@@ -157,15 +161,16 @@ variables.
 (defn get-var
   "Gets the variable var and pushes it onto the stack."
   [{:keys [vars] :as state} var]
-  (let [v (var-lookup state var)]
-    (update state :stack conj v)))
+  (->> var
+       (var-lookup state)
+       (update state :stack conj)))
 
 (defn compile-symbol
-  "Handles symbols (variable get/set, pop)"
+  "Emits code that handles symbols (variable get/set, pop)"
   [sym]
   (if (= sym '<pop>)
     `(update :stack rest)
-    (if-let [var (get-var-key sym)]
+    (if-let [var (parse-var-reference sym)]
       (let [[var set?] var]
         `(~(if set? 'set-var 'get-var) (quote ~var)))
       (throw-error "Unknown variable or symbol: %s" (name sym)))))
@@ -196,11 +201,12 @@ variables.
   `(invoke ~f ~arity))
 
 (defmacro threaded-if
-  "Expands an expression that expects state inserted as the first arg
-   to a let/if that returns the new state"
+  "Expands from an expression that fits into the threading macro ->
+   (in other words, takes the state as the first arg), to a let/if
+   that returns the new state"
   [state if-clause else-clause]
   `(let [tos# (-> ~state :stack first)
-         newstate# (update ~state :stack pop)]
+         newstate# (update ~state :stack rest)]
      (if tos#
        (-> newstate# ~@if-clause)
        (-> newstate# ~@else-clause))))
@@ -214,6 +220,7 @@ variables.
     `(threaded-if ~compiled-if ~compiled-else)))
 
 (defn compile-list
+  "Emits code for a list item (if or invoke)"
   [[function & args]]
   (case function
     if> (compile-if args)
@@ -233,36 +240,28 @@ variables.
     true (compile-constant item)))
 
 (defn assign-initial-vars
+  "Assigns a value to the initial variables specified in the first
+  argument to defstackfn. If there are more variables specified than
+  arguments, throw an error. If there are more arguments than
+  variables, discard the extra arguments."
   [state vars values]
+  (when (> (count vars) (count values))
+    (throw-error "Not enought arguments to assign all variables"))
   (let [;; discard the leading ! from var names
-        vars (map (comp first get-var-key) vars)
+        vars (map (comp first parse-var-reference) vars)
         ;; match up var names to args (discarding anything leftover)
         kvs (map vector vars values)]
     (update state :vars merge (into {} kvs))))
 
 (defmacro defstackfn
+  "Compile a function with the name name-sym, and a list of variable
+  names to assign at runtime to the arguments passed to the
+  function. The function accepts a variable number of args."
   [name-sym initial-vars & program]
   `(defn ~name-sym [& args#]
-     (-> (new-state)
-         (assign-initial-vars (quote ~initial-vars) args#)
-         ~@(for [item program]
-             (compile-item item)))))
+     (:stack (-> (new-state)
+                 (assign-initial-vars (quote ~initial-vars) args#)
+                 ~@(for [item program]
+                     (compile-item item))))))
 #+end_src
 
-#+RESULTS:
-| #'redplanetlabs.core/get-var-key         |
-| #'redplanetlabs.core/push                |
-| #'redplanetlabs.core/compile-constant    |
-| #'redplanetlabs.core/throw-error         |
-| #'redplanetlabs.core/var-lookup          |
-| #'redplanetlabs.core/set-var             |
-| #'redplanetlabs.core/get-var             |
-| #'redplanetlabs.core/compile-symbol      |
-| #'redplanetlabs.core/invoke              |
-| #'redplanetlabs.core/compile-invoke      |
-| #'redplanetlabs.core/threaded-if         |
-| #'redplanetlabs.core/compile-if          |
-| #'redplanetlabs.core/compile-list        |
-| #'redplanetlabs.core/compile-item        |
-| #'redplanetlabs.core/assign-initial-vars |
-| #'redplanetlabs.core/defstackfn          |
