@@ -13,7 +13,6 @@
    a proper reference.
 
    eg !v => [v false], !v+ => [v true], v => nil"
-
   [sym]
   (let [[_ var set?] (re-find #"^!([^+]+)(\+?)$" (name sym))
         set? (boolean (seq set?))]
@@ -59,11 +58,17 @@
        (var-lookup state)
        (update state :stack conj)))
 
+(defn pop
+  [{:keys [stack] :as state}]
+  (if (seq stack)
+    (update state :stack rest)
+    (throw-error "Stack underflow")))
+
 (defn compile-symbol
   "Emits code that handles symbols (variable get/set, pop)"
   [sym]
   (if (= sym '<pop>)
-    `(update :stack rest)
+    `(pop)
     (if-let [var (parse-var-reference sym)]
       (let [[var set?] var]
         `(~(if set? `set-var `get-var) (quote ~var)))
