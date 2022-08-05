@@ -289,12 +289,37 @@ sometimes trivial but make compiled code more readable.
         compiled-else (map compile-item else-clause)]
     `(threaded-if ~compiled-if ~compiled-else)))
 
+
+(defmacro threaded-loop
+  "Expands from an expression that fits into the threading macro ->
+   (in other words, takes the state as the first arg), to a let/loop
+   that returns the new state"
+  [state body]
+  `(loop [state# ~state continue?# true]
+     (if continue?#
+       (if (-> ~state :stack seq)
+         (let [tos# (-> state# :stack first)
+               newstate# (update state# :stack rest)]
+           ;; add a default recur to the end of the body
+           (if tos#
+             (-> newstate# ~@(conj (vec body) `(recur true)))
+             (recur newstate# false)))
+         (throw-error "Stack underflow"))
+       state#)))
+
+(defn compile-loop
+  "Compiles a loop, which checks the ToS for truthy to
+  continue. Supports 'continue' and 'break'"
+  [body]
+  `(threaded-loop ~(map compile-item body)))
+
 (defn compile-list
   "Emits code for a list item (if or invoke)"
   [[function & args]]
   (case function
     if> (compile-if args)
     invoke> (compile-invoke args)
+    loop> (compile-loop args)
     (throw-error "Unknown function: %s" function)))
 
 (defn compile-item
@@ -380,6 +405,20 @@ sometimes trivial but make compiled code more readable.
     else> -99))
 
 (sut/defstackfn shadow [!x !y] !x !y !x+ !x)
+
+(sut/defstackfn loop []
+  1 true
+  (loop> !x+ !x ;; hacky dup
+         (invoke> + 2)
+         !x+ !x 
+         10000 (invoke> < 2)))
+
+(sut/defstackfn fib [!start !max]
+  !start !start true
+  (loop> !a+ <pop> !b+ <pop> !a !a !b
+         (invoke> + 2) ;; 1 2
+         !b !b 
+         !max (invoke> < 2)))
 
 (deftest example-test
   (is (= (example 1 2 4) '(24))))
