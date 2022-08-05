@@ -84,6 +84,62 @@ in the =if>= block. As to which is the better design, it's hard to say
 given the extreme simplicity of the language. Scoping is not strictly
 needed - the stack provides a similar ability to shadow values (by
 placing a new value on ToS and later popping it off).
+*** Loops
+It should be fairly straightforward to compile a =loop= word into a
+clojure =loop=. The part that doesn't easily fit seems to be
+=break=. In a clojure =loop=, there is no explicit =break=. Instead
+the default is to stop whenever the body terminates without a
+=recur=. I think we can simulate =break= as follows:
+
+#+begin_src clojure
+(loop [state state
+       continue? true] ;; this boolean added by compiler, not exposed to stack lang
+  (when (and continue?
+             (-> state :stack seq) ;; should really throw stack underflow if this is false
+             (-> state :stack first))
+    ;; compiled loop body here
+    ;; a 'break' would be expanded into
+    (recur state false)
+    ;; a continue would be expanded into
+    (recur state true)
+    ;; and the end of the loop would add to repeat the loop by default,
+    ;; only exiting when the top stack item is falsey.
+    (recur state true)))
+#+end_src
+
+*** Anonymous stack functions
+The basic idea here is to compile something like
+#+begin_src 
+(fn> 3 (invoke> + 2))
+#+end_src
+
+into
+#+begin_src clojure
+(fn [state]
+  (-> state
+      ;; expansion of the body
+      ))
+#+end_src
+
+Then we'd have the ability to place function objects on the stack, but
+still lack the ability to call them. Then we'd need a word =call>=
+that invokes the function on the ToS.
+
+#+begin_src clojure
+(let [f (-> state :stack first)] ;; handle popping and stackunderflow here
+    (f state))
+#+end_src
+*** Multi-arity stack functions
+I am not sure what this means, since a "stack function" is a function
+of one argument: the stack. Perhaps this means you can implement the
+word =call>= to take additional arguments beyond the stack. This seems
+kind of silly, since you could just push the items onto the stack and
+then call the function. Maybe instead of taking arguments directly,
+the =call>= form will just take an argument count, which represents
+how many items to take from the stack and apply to the function. Even
+better would be to take the argument count from the stack, but this
+seems at odds with the design of =invoke>=.
+
 ** Implementation
 *** Project file
 #+begin_src clojure :tangle project.clj
