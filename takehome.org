@@ -107,6 +107,56 @@ the default is to stop whenever the body terminates without a
     (recur state true)))
 #+end_src
 
+The problem with the above is that you can't have the last recur all
+the time, if there's a recur already somewhere nested in the
+body. Then that inner recur is no longer in tail position and the
+clojure compiler doesn't allow it.
+
+There are several possible approaches to deal with this problem:
+**** Rewrite the body so that each branch ends with its own recur
+#+begin_src
+(loop> x (if> break else> 2) 3)
+;; equivalent to
+(loop> x (if> break else> 2 3))
+;; because the break guarantees the 3 can only be reached in the false branch
+
+rewrite an if inside a loop that contains break to move everything after the form
+into the else branch. Then place a =(recur true)= at the end of the else branch to
+continue.
+#+end_src
+#+begin_src clojure
+x
+(if ..
+    state ;; break
+    (-> state ((push 2) (push 3) (recur true))))
+#+end_src
+
+it gets more complex if there are multiple ifs:
+
+#+begin_src
+(loop x (if> 6 break else> 2) 5 (if 7 break else> 4) 11)
+#+end_src
+
+#+begin_src clojure
+x 
+(if ..
+ (-> (push 6) (recur false))
+ (-> (5 (if .. (-> 7 (recur false)) (-> 4 11 (recur true))) 
+#+end_src
+
+we could now just leave out the (recur false)s:
+
+#+begin_src clojure
+x 
+(if ..
+ (-> (push 6))
+ (-> (5 (if .. (-> 7) (-> 4 11 (recur true)))
+#+end_src
+
+Should we rewrite the stackish and then compile?
+#+begin_src 
+(loop x (if> 6 break else> 2 5 (if> 7 break> else> 4 11)))
+#+end_src
 *** Anonymous stack functions
 The basic idea here is to compile something like
 #+begin_src 
@@ -236,8 +286,12 @@ sometimes trivial but make compiled code more readable.
 (defn compile-symbol
   "Emits code that handles symbols (variable get/set, pop)"
   [sym]
-  (if (= sym '<pop>)
-    `(pop)
+  (case sym
+    <pop> `(pop)
+    break> `(identity) ;; in clojure we break loops by default and logic has
+    ;; already been shifted around so breaks aren't needed
+    
+    continue> '(recur)
     (if-let [var (parse-var-reference sym)]
       (let [[var set?] var]
         `(~(if set? `set-var `get-var) (quote ~var)))
@@ -281,10 +335,60 @@ sometimes trivial but make compiled code more readable.
 
 (declare compile-item)
 
+(defn split-if
+  [items]
+  (let [[if-clause [_ & else-clause]] (split-with #(not= % else-sym) items)]
+    [if-clause else-clause]))
+
+(defn check-break-if-clause
+  "Checks if the clause has break/continue. Returns true if it is
+  last, false if not present, and throws an exception if present but
+  not last"
+  [clause]
+  (let [kws #{'break> 'continue>}]
+    (if (some kws clause)
+      (if (kws (last clause))
+        true
+        (throw-error "Break and continue must be last in clause"))
+      false)))
+
+(def if-sym 'if>)
+(def else-sym 'else>)
+
+(defn shift-loop-breaks
+  "If a loop body contains an if that contains a 'break' (also
+   includes 'continue') in one branch, move the rest of the body
+   following the if into the other branch, then recurse into that
+   joined branch. Throws exception if break/continue isn't in tail
+   position"
+  [body]
+  (let [[up-to-if [[_ & the-if] & remaining]] (split-with (fn [x]
+                                                    (not (and (seq? x)
+                                                              (-> x first (= if-sym)))))
+                                                  body)]
+    (if the-if
+      (let [[if-clause else-clause :as clauses] (split-if the-if)
+            [break-cont-if? break-cont-else?] (map check-break-if-clause clauses)]
+        (if (not= break-cont-if? break-cont-else?)
+          ;; do the shift
+          (list* (conj (vec up-to-if)
+                       (if break-cont-if?
+                         (concat [if-sym] if-clause [else-sym]
+                                 (shift-loop-breaks (concat else-clause remaining)) ['continue>])
+                         (concat [if-sym] (shift-loop-breaks (concat if-clause remaining)) ['continue>]
+                                 [else-sym] else-clause))))
+          (if break-cont-if?
+            ;; break in both positions, what now?
+            body ;; FIXME:
+            ;; neither has a break
+            body
+            )))
+      body)))
+
 (defn compile-if
   "Emits code for if> else>"
   [items]
-  (let [[if-clause [_ & else-clause]] (split-with #(not= % 'else>) items)
+  (let [[if-clause else-clause] (split-if items)
         compiled-if (map compile-item if-clause)
         compiled-else (map compile-item else-clause)]
     `(threaded-if ~compiled-if ~compiled-else)))
@@ -295,23 +399,42 @@ sometimes trivial but make compiled code more readable.
    (in other words, takes the state as the first arg), to a let/loop
    that returns the new state"
   [state body]
-  `(loop [state# ~state continue?# true]
-     (if continue?#
-       (if (-> ~state :stack seq)
-         (let [tos# (-> state# :stack first)
-               newstate# (update state# :stack rest)]
-           ;; add a default recur to the end of the body
-           (if tos#
-             (-> newstate# ~@(conj (vec body) `(recur true)))
-             (recur newstate# false)))
-         (throw-error "Stack underflow"))
-       state#)))
+  `(loop [state# ~state]
+     (if (-> ~state :stack seq)
+       (let [tos# (-> state# :stack first)
+             newstate# (update state# :stack rest)]
+         ;; add a default recur to the end of the body
+         (if tos#
+           ;;(-> newstate# ~@(conj (vec body) `(recur true)))
+           
+           ;;TODO: the above ends up not being in tail position if
+           ;; there's a recur elsewhere. May need to do something
+           ;; like walk the body and insert recur at all the leaves
+           ;; that don't have it already. What I can't do is
+           ;; (recur (if foo 2 (recur false)) true)
+           ;; must instead be
+           ;; (if foo (do 2 (recur true)) (recur false)) another
+           ;; possibly much simpler approach would be to expand into
+           ;; 'while' but then there's no 'break' .  Maybe an even
+           ;; better approach is to only use one recur at the end as
+           ;; above, but let the body set the boolean - the body
+           ;; could return a pair [state, continue?]. But that
+           ;; alters the contract of state -> state that we use
+           ;; everywhere else. we could make the data part of the
+           ;; state. Then the clojure compiler would no longer be
+           ;; able to check nothing follows break/continue and we'd
+           ;; have to do it ourselves.  If we have to walk the tree
+           ;; either way, might lean towards inserting recurs.
+           (-> newstate# ~@body)
+           newstate#))
+       (throw-error "Stack underflow"))))
+
 
 (defn compile-loop
   "Compiles a loop, which checks the ToS for truthy to
   continue. Supports 'continue' and 'break'"
   [body]
-  `(threaded-loop ~(map compile-item body)))
+  `(threaded-loop ~(map compile-item (shift-loop-breaks body))))
 
 (defn compile-list
   "Emits code for a list item (if or invoke)"
@@ -330,7 +453,7 @@ sometimes trivial but make compiled code more readable.
   returns the state that this item needs."
   [item]
   (cond
-    (list? item) (compile-list item)
+    (sequential? item) (compile-list item)
     (symbol? item) (compile-symbol item)
     true (compile-constant item)))
 
@@ -431,5 +554,8 @@ sometimes trivial but make compiled code more readable.
 
 (deftest shadow-test
   (is (= (shadow 1 2) '(2 2 1))))
+
+(deftest loop-test
+  (is (= (fib 1 10) '(13 21 8 5 3 2 1 1))))
 #+end_src
 
