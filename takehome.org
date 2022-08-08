@@ -355,17 +355,19 @@ sometimes trivial but make compiled code more readable.
 (def if-sym 'if>)
 (def else-sym 'else>)
 
+(defn if?
+  "Returns true if the stack item is an if> expression"
+  [item]
+  (and (seq? item)
+       (-> item first (= if-sym))))
+
 (defn shift-loop-breaks
-  "If a loop body contains an if that contains a 'break' (also
-   includes 'continue') in one branch, move the rest of the body
-   following the if into the other branch, then recurse into that
-   joined branch. Throws exception if break/continue isn't in tail
-   position"
+  "If a loop body contains an if that contains a 'break/continue' in
+   one branch, move the rest of the body following the if into the
+   other branch, then recurse into that joined branch. Throws
+   exception if break/continue isn't in tail position"
   [body]
-  (let [[up-to-if [[_ & the-if] & remaining]] (split-with (fn [x]
-                                                    (not (and (seq? x)
-                                                              (-> x first (= if-sym)))))
-                                                  body)]
+  (let [[up-to-if [[_ & the-if] & remaining]] (split-with #(not (if? %)) body)]
     (if the-if
       (let [[if-clause else-clause :as clauses] (split-if the-if)
             [break-cont-if? break-cont-else?] (map check-break-if-clause clauses)]
@@ -374,16 +376,16 @@ sometimes trivial but make compiled code more readable.
           (list* (conj (vec up-to-if)
                        (if break-cont-if?
                          (concat [if-sym] if-clause [else-sym]
-                                 (shift-loop-breaks (concat else-clause remaining)) ['continue>])
-                         (concat [if-sym] (shift-loop-breaks (concat if-clause remaining)) ['continue>]
+                                 (shift-loop-breaks (concat else-clause remaining)))
+                         (concat [if-sym] (shift-loop-breaks (concat if-clause remaining))
                                  [else-sym] else-clause))))
           (if break-cont-if?
-            ;; break in both positions, what now?
-            body ;; FIXME:
-            ;; neither has a break
+            ;; break in both positions, nothing needs changing 
             body
+            ;; neither has a break, default continue after
+            (-> body vec (conj 'continue>) list*)
             )))
-      body)))
+      (-> body vec (conj 'continue>) list*))))
 
 (defn compile-if
   "Emits code for if> else>"
