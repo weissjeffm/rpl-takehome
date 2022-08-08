@@ -223,7 +223,11 @@ variables (with decorations =!= and =+= stripped).
 There are functions that create clojure code from =defstackfn= items
 and functions that do the work at runtime. The runtime functions are
 sometimes trivial but make compiled code more readable. 
-#+begin_src clojure :tangle src/redplanetlabs/core.clj :results none
+#+begin_src clojure :tangle src/redplanetlabs/core.clj
+;; TODO: define vars for all the keywords
+(def if-sym 'if>)
+(def else-sym 'else>)
+
 (defn parse-var-reference
   "Returns a pair or nil. In the pair, the first item is a symbol for
    the variable being referred to (either a get '!v' or set '!v+'
@@ -277,21 +281,33 @@ sometimes trivial but make compiled code more readable.
        (var-lookup state)
        (update state :stack conj)))
 
-(defn pop
+(defn pop-item
+  "Returns pair of [state, ToS] where state's stack has ToS popped
+   off. Throws error on empty stack."
   [{:keys [stack] :as state}]
   (if (seq stack)
-    (update state :stack rest)
+    (let [tos (-> state :stack first)
+          newstate (update state :stack rest)]
+      [newstate tos])
     (throw-error "Stack underflow")))
+
+(defn pop
+  "Drops the top item on the stack"
+  [state]
+  (first (pop-item state)))
 
 (defn compile-symbol
   "Emits code that handles symbols (variable get/set, pop)"
   [sym]
   (case sym
     <pop> `(pop)
-    break> `(identity) ;; in clojure we break loops by default and logic has
-    ;; already been shifted around so breaks aren't needed
+    break> `(identity) ;; in clojure we break loops by default and
+    ;; logic has already been shifted around so breaks aren't needed
+    ;; TODO: make it so this symbol is always removed during
+    ;; normalization and no longer needs to compile to a no-op
     
-    continue> '(recur)
+    continue> '(recur) ;; normalization guaranteed this will be only
+                       ;; in the tail position
     (if-let [var (parse-var-reference sym)]
       (let [[var set?] var]
         `(~(if set? `set-var `get-var) (quote ~var)))
@@ -327,8 +343,7 @@ sometimes trivial but make compiled code more readable.
    (in other words, takes the state as the first arg), to a let/if
    that returns the new state"
   [state if-clause else-clause]
-  `(let [tos# (-> ~state :stack first)
-         newstate# (update ~state :stack rest)]
+  `(let [[newstate# tos#] (pop-item ~state)]
      (if tos#
        (-> newstate# ~@if-clause)
        (-> newstate# ~@else-clause))))
@@ -352,14 +367,17 @@ sometimes trivial but make compiled code more readable.
         (throw-error "Break and continue must be last in clause"))
       false)))
 
-(def if-sym 'if>)
-(def else-sym 'else>)
-
 (defn if?
   "Returns true if the stack item is an if> expression"
   [item]
   (and (seq? item)
        (-> item first (= if-sym))))
+
+(defn add-loop-continue
+  "Adds a loop continue if it's not already there"
+  [body]
+  (cond-> body
+    (-> body last (not= 'continue>)) (-> vec (conj 'continue>) list*)))
 
 (defn shift-loop-breaks
   "If a loop body contains an if that contains a 'break/continue' in
@@ -383,9 +401,9 @@ sometimes trivial but make compiled code more readable.
             ;; break in both positions, nothing needs changing 
             body
             ;; neither has a break, default continue after
-            (-> body vec (conj 'continue>) list*)
-            )))
-      (-> body vec (conj 'continue>) list*))))
+            (add-loop-continue body))))
+      ;; no branch logic, continue by default
+      (add-loop-continue body))))
 
 (defn compile-if
   "Emits code for if> else>"
@@ -395,42 +413,16 @@ sometimes trivial but make compiled code more readable.
         compiled-else (map compile-item else-clause)]
     `(threaded-if ~compiled-if ~compiled-else)))
 
-
 (defmacro threaded-loop
   "Expands from an expression that fits into the threading macro ->
    (in other words, takes the state as the first arg), to a let/loop
    that returns the new state"
   [state body]
   `(loop [state# ~state]
-     (if (-> ~state :stack seq)
-       (let [tos# (-> state# :stack first)
-             newstate# (update state# :stack rest)]
-         ;; add a default recur to the end of the body
-         (if tos#
-           ;;(-> newstate# ~@(conj (vec body) `(recur true)))
-           
-           ;;TODO: the above ends up not being in tail position if
-           ;; there's a recur elsewhere. May need to do something
-           ;; like walk the body and insert recur at all the leaves
-           ;; that don't have it already. What I can't do is
-           ;; (recur (if foo 2 (recur false)) true)
-           ;; must instead be
-           ;; (if foo (do 2 (recur true)) (recur false)) another
-           ;; possibly much simpler approach would be to expand into
-           ;; 'while' but then there's no 'break' .  Maybe an even
-           ;; better approach is to only use one recur at the end as
-           ;; above, but let the body set the boolean - the body
-           ;; could return a pair [state, continue?]. But that
-           ;; alters the contract of state -> state that we use
-           ;; everywhere else. we could make the data part of the
-           ;; state. Then the clojure compiler would no longer be
-           ;; able to check nothing follows break/continue and we'd
-           ;; have to do it ourselves.  If we have to walk the tree
-           ;; either way, might lean towards inserting recurs.
-           (-> newstate# ~@body)
-           newstate#))
-       (throw-error "Stack underflow"))))
-
+     (let [[newstate# tos#] (pop-item state#)]
+       (if tos#
+         (-> newstate# ~@body)
+         newstate#))))
 
 (defn compile-loop
   "Compiles a loop, which checks the ToS for truthy to
@@ -485,6 +477,35 @@ sometimes trivial but make compiled code more readable.
          :stack)))
 #+end_src
 
+#+RESULTS:
+| #'redplanetlabs.core/parse-var-reference   |
+| #'redplanetlabs.core/push                  |
+| #'redplanetlabs.core/compile-constant      |
+| #'redplanetlabs.core/throw-error           |
+| #'redplanetlabs.core/var-lookup            |
+| #'redplanetlabs.core/set-var               |
+| #'redplanetlabs.core/get-var               |
+| #'redplanetlabs.core/pop                   |
+| #'redplanetlabs.core/compile-symbol        |
+| #'redplanetlabs.core/invoke                |
+| #'redplanetlabs.core/compile-invoke        |
+| #'redplanetlabs.core/threaded-if           |
+| #'redplanetlabs.core/compile-item          |
+| #'redplanetlabs.core/split-if              |
+| #'redplanetlabs.core/check-break-if-clause |
+| #'redplanetlabs.core/if-sym                |
+| #'redplanetlabs.core/else-sym              |
+| #'redplanetlabs.core/if?                   |
+| #'redplanetlabs.core/add-loop-continue     |
+| #'redplanetlabs.core/shift-loop-breaks     |
+| #'redplanetlabs.core/compile-if            |
+| #'redplanetlabs.core/threaded-loop         |
+| #'redplanetlabs.core/compile-loop          |
+| #'redplanetlabs.core/compile-list          |
+| #'redplanetlabs.core/compile-item          |
+| #'redplanetlabs.core/assign-initial-vars   |
+| #'redplanetlabs.core/defstackfn            |
+
 *** Tests
 #+begin_src clojure :tangle test/redplanetlabs/core_test.clj :results none
 (ns redplanetlabs.core-test
@@ -531,7 +552,7 @@ sometimes trivial but make compiled code more readable.
 
 (sut/defstackfn shadow [!x !y] !x !y !x+ !x)
 
-(sut/defstackfn loop []
+(sut/defstackfn looping []
   1 true
   (loop> !x+ !x ;; hacky dup
          (invoke> + 2)
@@ -544,6 +565,14 @@ sometimes trivial but make compiled code more readable.
          (invoke> + 2) ;; 1 2
          !b !b 
          !max (invoke> < 2)))
+
+(sut/defstackfn loop-break1 [!start]
+  !start true
+  (loop> !x+ !x (invoke> dec 1)
+         !x+ !x 5 (invoke> < 2)
+         (if> break>
+           else>
+           !x+ !x (invoke> pos? 1))))
 
 (deftest example-test
   (is (= (example 1 2 4) '(24))))
@@ -558,6 +587,7 @@ sometimes trivial but make compiled code more readable.
   (is (= (shadow 1 2) '(2 2 1))))
 
 (deftest loop-test
-  (is (= (fib 1 10) '(13 21 8 5 3 2 1 1))))
+  (is (= (fib 1 10) '(13 21 8 5 3 2 1 1)))
+  (is (= (loop-break1 7 '(7 6 5 4)))))
 #+end_src
 
