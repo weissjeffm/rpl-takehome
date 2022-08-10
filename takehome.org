@@ -68,6 +68,18 @@
   )
 ;; (f 1 2 4) prints "false!!" and returns 24
 #+end_src
+** Part 2 Problem statement
+Modify your first project by designing and implementing:
+
+1. Virtual method invokes, e.g. invoking "List/get" on a list and an
+   arg on the stack (feel free to use reflection)
+2. Anonymous stack functions (defined as part of a defstackfn) with
+   lexical closures.
+3. Multi-arity stack functions, including varargs
+4. Loops, including “break” and “continue” operations
+
+Feel free to change the existing API as necessary to support these
+additional features.
 ** Design
 *** Basic approach
 We'll compile the various statements into forms. Each successive form
