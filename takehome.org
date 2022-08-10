@@ -240,6 +240,20 @@ sometimes trivial but make compiled code more readable.
 (def if-sym 'if>)
 (def else-sym 'else>)
 
+(defn debug [state]
+  (doto state
+    println))
+
+(def ^:dynamic *debug* false)
+
+(defmacro -debug>
+  [& body]
+  (println body)
+  (let [body (if *debug*
+               (interpose `debug body)
+               body)]
+    `(-> ~@body)))
+
 (defn parse-var-reference
   "Returns a pair or nil. In the pair, the first item is a symbol for
    the variable being referred to (either a get '!v' or set '!v+'
@@ -357,8 +371,8 @@ sometimes trivial but make compiled code more readable.
   [state if-clause else-clause]
   `(let [[newstate# tos#] (pop-item ~state)]
      (if tos#
-       (-> newstate# ~@if-clause)
-       (-> newstate# ~@else-clause))))
+       (-debug> newstate# ~@if-clause)
+       (-debug> newstate# ~@else-clause))))
 
 (declare compile-item)
 
@@ -433,7 +447,7 @@ sometimes trivial but make compiled code more readable.
   `(loop [state# ~state]
      (let [[newstate# tos#] (pop-item state#)]
        (if tos#
-         (-> newstate# ~@body)
+         (-debug> newstate# ~@body)
          newstate#))))
 
 (defn compile-loop
@@ -483,40 +497,44 @@ sometimes trivial but make compiled code more readable.
   function. The function accepts a variable number of args."
   [name-sym initial-vars & program]
   `(defn ~name-sym [& args#]
-     (-> (new-state)
+     (-debug> (new-state)
          (assign-initial-vars (quote ~initial-vars) args#)
          ~@(map compile-item program)
          :stack)))
 #+end_src
 
 #+RESULTS:
-| #'redplanetlabs.core/parse-var-reference   |
-| #'redplanetlabs.core/push                  |
-| #'redplanetlabs.core/compile-constant      |
-| #'redplanetlabs.core/throw-error           |
-| #'redplanetlabs.core/var-lookup            |
-| #'redplanetlabs.core/set-var               |
-| #'redplanetlabs.core/get-var               |
-| #'redplanetlabs.core/pop                   |
-| #'redplanetlabs.core/compile-symbol        |
-| #'redplanetlabs.core/invoke                |
-| #'redplanetlabs.core/compile-invoke        |
-| #'redplanetlabs.core/threaded-if           |
-| #'redplanetlabs.core/compile-item          |
-| #'redplanetlabs.core/split-if              |
-| #'redplanetlabs.core/check-break-if-clause |
-| #'redplanetlabs.core/if-sym                |
-| #'redplanetlabs.core/else-sym              |
-| #'redplanetlabs.core/if?                   |
-| #'redplanetlabs.core/add-loop-continue     |
-| #'redplanetlabs.core/shift-loop-breaks     |
-| #'redplanetlabs.core/compile-if            |
-| #'redplanetlabs.core/threaded-loop         |
-| #'redplanetlabs.core/compile-loop          |
-| #'redplanetlabs.core/compile-list          |
-| #'redplanetlabs.core/compile-item          |
-| #'redplanetlabs.core/assign-initial-vars   |
-| #'redplanetlabs.core/defstackfn            |
+| #'redplanetlabs.core-test/if-sym                |
+| #'redplanetlabs.core-test/else-sym              |
+| #'redplanetlabs.core-test/debug                 |
+| #'redplanetlabs.core-test/*debug*               |
+| #'redplanetlabs.core-test/-debug>               |
+| #'redplanetlabs.core-test/parse-var-reference   |
+| #'redplanetlabs.core-test/push                  |
+| #'redplanetlabs.core-test/compile-constant      |
+| #'redplanetlabs.core-test/throw-error           |
+| #'redplanetlabs.core-test/var-lookup            |
+| #'redplanetlabs.core-test/set-var               |
+| #'redplanetlabs.core-test/get-var               |
+| #'redplanetlabs.core-test/pop-item              |
+| #'redplanetlabs.core-test/pop                   |
+| #'redplanetlabs.core-test/compile-symbol        |
+| #'redplanetlabs.core-test/invoke                |
+| #'redplanetlabs.core-test/compile-invoke        |
+| #'redplanetlabs.core-test/threaded-if           |
+| #'redplanetlabs.core-test/compile-item          |
+| #'redplanetlabs.core-test/split-if              |
+| #'redplanetlabs.core-test/check-break-if-clause |
+| #'redplanetlabs.core-test/if?                   |
+| #'redplanetlabs.core-test/add-loop-continue     |
+| #'redplanetlabs.core-test/shift-loop-breaks     |
+| #'redplanetlabs.core-test/compile-if            |
+| #'redplanetlabs.core-test/threaded-loop         |
+| #'redplanetlabs.core-test/compile-loop          |
+| #'redplanetlabs.core-test/compile-list          |
+| #'redplanetlabs.core-test/compile-item          |
+| #'redplanetlabs.core-test/assign-initial-vars   |
+| #'redplanetlabs.core-test/defstackfn            |
 
 *** Tests
 #+begin_src clojure :tangle test/redplanetlabs/core_test.clj :results none
