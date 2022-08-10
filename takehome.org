@@ -473,7 +473,8 @@ sometimes trivial but make compiled code more readable.
   returns the state that this item needs."
   [item]
   (cond
-    (sequential? item) (compile-list item)
+    (and (sequential? item)
+         (not (vector? item))) (compile-list item)
     (symbol? item) (compile-symbol item)
     true (compile-constant item)))
 
