@@ -248,7 +248,7 @@ sometimes trivial but make compiled code more readable.
 
 (defmacro -debug>
   [& body]
-  (println body)
+  ;;(println body)
   (let [body (if *debug*
                (interpose `debug body)
                body)]
@@ -327,6 +327,7 @@ sometimes trivial but make compiled code more readable.
   [sym]
   (case sym
     <pop> `(pop)
+    call> `(call)
     break> `(identity) ;; in clojure we break loops by default and
     ;; logic has already been shifted around so breaks aren't needed
     ;; TODO: make it so this symbol is always removed during
@@ -376,10 +377,20 @@ sometimes trivial but make compiled code more readable.
 
 (declare compile-item)
 
+
 (defn split-if
+  "Splits an if> body into a pair, [if-clause, else-clause]"
   [items]
   (let [[if-clause [_ & else-clause]] (split-with #(not= % else-sym) items)]
     [if-clause else-clause]))
+
+(defn compile-if
+  "Emits code for if> else>"
+  [items]
+  (let [[if-clause else-clause] (split-if items)
+        compiled-if (map compile-item if-clause)
+        compiled-else (map compile-item else-clause)]
+    `(threaded-if ~compiled-if ~compiled-else)))
 
 (defn check-break-if-clause
   "Checks if the clause has break/continue. Returns true if it is
@@ -431,14 +442,6 @@ sometimes trivial but make compiled code more readable.
       ;; no branch logic, continue by default
       (add-loop-continue body))))
 
-(defn compile-if
-  "Emits code for if> else>"
-  [items]
-  (let [[if-clause else-clause] (split-if items)
-        compiled-if (map compile-item if-clause)
-        compiled-else (map compile-item else-clause)]
-    `(threaded-if ~compiled-if ~compiled-else)))
-
 (defmacro threaded-loop
   "Expands from an expression that fits into the threading macro ->
    (in other words, takes the state as the first arg), to a let/loop
@@ -456,6 +459,29 @@ sometimes trivial but make compiled code more readable.
   [body]
   `(threaded-loop ~(map compile-item (shift-loop-breaks body))))
 
+(defmacro threaded-fn
+  "Expands from an expression that fits into the threading macro ->
+   (in other words, takes the state as the first arg), to a let/fn
+   that returns the new state"
+  [state body]
+  `(let [orig# ~state]
+     (push orig# (fn [state#]
+                   (let [captured# (update state# :vars merge (:vars orig#))]
+                     (-debug> captured# ~@body))))))
+
+(defn compile-fn
+  "Emits code for an anonymous function object"
+  [body]
+  `(threaded-fn ~(map compile-item body)))
+
+(defn call
+  "Calls anonymous function on ToS"
+  [state]
+  (let [[state tos] (pop-item state)]
+    (if (fn? tos)
+      (tos state)
+      (throw-error "Call attempted on value that isn't a function: %s", (pr-str tos)))))
+
 (defn compile-list
   "Emits code for a list item (if or invoke)"
   [[function & args]]
@@ -463,6 +489,7 @@ sometimes trivial but make compiled code more readable.
     if> (compile-if args)
     invoke> (compile-invoke args)
     loop> (compile-loop args)
+    fn> (compile-fn args)
     (throw-error "Unknown function: %s" function)))
 
 (defn compile-item
@@ -524,14 +551,17 @@ sometimes trivial but make compiled code more readable.
 | #'redplanetlabs.core/compile-invoke        |
 | #'redplanetlabs.core/threaded-if           |
 | #'redplanetlabs.core/compile-item          |
+| #'redplanetlabs.core/compile-if            |
 | #'redplanetlabs.core/split-if              |
 | #'redplanetlabs.core/check-break-if-clause |
 | #'redplanetlabs.core/if?                   |
 | #'redplanetlabs.core/add-loop-continue     |
 | #'redplanetlabs.core/shift-loop-breaks     |
-| #'redplanetlabs.core/compile-if            |
 | #'redplanetlabs.core/threaded-loop         |
 | #'redplanetlabs.core/compile-loop          |
+| #'redplanetlabs.core/threaded-fn           |
+| #'redplanetlabs.core/compile-fn            |
+| #'redplanetlabs.core/call                  |
 | #'redplanetlabs.core/compile-list          |
 | #'redplanetlabs.core/compile-item          |
 | #'redplanetlabs.core/assign-initial-vars   |
@@ -632,6 +662,12 @@ sometimes trivial but make compiled code more readable.
    !len
    (invoke> <= 2)))
 
+(sut/defstackfn closure []
+  4 !x+
+  (fn> !x 4 (invoke> = 2) (if> :yes else> :no)) ;; capture x as 4
+  5 !x+ <pop> ;; change x
+  call>)
+
 (deftest example-test
   (is (= (example 1 2 4) '(24))))
 
@@ -650,5 +686,8 @@ sometimes trivial but make compiled code more readable.
 
 (deftest nested-loop-test
   (is (= (loop-nested 3) '([[1 2 3] [1 2 3] [1 2 3]]))))
+
+(deftest lexical-closure-test
+  (is (= (closure) '(:yes 4))))
 #+end_src
 
