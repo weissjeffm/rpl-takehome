@@ -248,7 +248,6 @@ sometimes trivial but make compiled code more readable.
 
 (defmacro -debug>
   [& body]
-  ;;(println body)
   (let [body (if *debug*
                (interpose `debug body)
                body)]
@@ -327,7 +326,6 @@ sometimes trivial but make compiled code more readable.
   [sym]
   (case sym
     <pop> `(pop)
-    call> `(call)
     break> `(identity) ;; in clojure we break loops by default and
     ;; logic has already been shifted around so breaks aren't needed
     ;; TODO: make it so this symbol is always removed during
@@ -463,23 +461,24 @@ sometimes trivial but make compiled code more readable.
   "Expands from an expression that fits into the threading macro ->
    (in other words, takes the state as the first arg), to a let/fn
    that returns the new state"
-  [state body]
+  [state vars body]
   `(let [orig# ~state]
-     (push orig# (fn [state#]
+     (push orig# (fn [state# args#]
                    (let [captured# (update state# :vars merge (:vars orig#))]
-                     (-debug> captured# ~@body))))))
+                     (-debug> captured# (assign-initial-vars (quote ~vars) args#)~@body))))))
 
 (defn compile-fn
   "Emits code for an anonymous function object"
-  [body]
-  `(threaded-fn ~(map compile-item body)))
+  [[vars & body]]
+  `(threaded-fn ~vars ~(map compile-item body)))
 
 (defn call
   "Calls anonymous function on ToS"
-  [state]
+  [state args]
+  (println state args)
   (let [[state tos] (pop-item state)]
     (if (fn? tos)
-      (tos state)
+      (tos state args)
       (throw-error "Call attempted on value that isn't a function: %s", (pr-str tos)))))
 
 (defn compile-list
@@ -490,6 +489,7 @@ sometimes trivial but make compiled code more readable.
     invoke> (compile-invoke args)
     loop> (compile-loop args)
     fn> (compile-fn args)
+    call> `(call (quote ~args))
     (throw-error "Unknown function: %s" function)))
 
 (defn compile-item
@@ -524,11 +524,14 @@ sometimes trivial but make compiled code more readable.
   names to assign at runtime to the arguments passed to the
   function. The function accepts a variable number of args."
   [name-sym initial-vars & program]
-  `(defn ~name-sym [& args#]
-     (-debug> (new-state)
-         (assign-initial-vars (quote ~initial-vars) args#)
-         ~@(map compile-item program)
-         :stack)))
+  (let [args-sym (gensym "args")
+        program `(-debug> (new-state)
+                         (assign-initial-vars (quote ~initial-vars) ~args-sym)
+                         ~@(map compile-item program)
+                         :stack)]
+    (clojure.pprint/pprint program)
+    `(defn ~name-sym [& ~args-sym]
+       ~program)))
 #+end_src
 
 #+RESULTS:
@@ -551,8 +554,8 @@ sometimes trivial but make compiled code more readable.
 | #'redplanetlabs.core/compile-invoke        |
 | #'redplanetlabs.core/threaded-if           |
 | #'redplanetlabs.core/compile-item          |
-| #'redplanetlabs.core/compile-if            |
 | #'redplanetlabs.core/split-if              |
+| #'redplanetlabs.core/compile-if            |
 | #'redplanetlabs.core/check-break-if-clause |
 | #'redplanetlabs.core/if?                   |
 | #'redplanetlabs.core/add-loop-continue     |
@@ -664,9 +667,11 @@ sometimes trivial but make compiled code more readable.
 
 (sut/defstackfn closure []
   4 !x+
-  (fn> !x 4 (invoke> = 2) (if> :yes else> :no)) ;; capture x as 4
-  5 !x+ <pop> ;; change x
-  call>)
+  (fn> [!z] !x 4 (invoke> = 2)
+       (if> !z :yes
+            else> :no)) ;; capture x as 4
+  5 !x+ ;; change x
+  <pop> (call> :fnarg))
 
 (deftest example-test
   (is (= (example 1 2 4) '(24))))
@@ -688,6 +693,6 @@ sometimes trivial but make compiled code more readable.
   (is (= (loop-nested 3) '([[1 2 3] [1 2 3] [1 2 3]]))))
 
 (deftest lexical-closure-test
-  (is (= (closure) '(:yes 4))))
+  (is (= (closure) '(:yes :fnarg 4))))
 #+end_src
 
