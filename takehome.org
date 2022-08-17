@@ -264,9 +264,15 @@ There are functions that create clojure code from =defstackfn= items
 and functions that do the work at runtime. The runtime functions are
 sometimes trivial but make compiled code more readable. 
 #+begin_src clojure :tangle src/redplanetlabs/core.clj
-;; TODO: define vars for all the keywords
 (def if-sym 'if>)
 (def else-sym 'else>)
+(def loop-sym 'loop>)
+(def break-sym 'break>)
+(def pop-sym '<pop>)
+(def invoke-sym 'invoke>)
+(def call-sym 'call>)
+(def fn-sym 'fn>)
+(def continue-sym 'continue>)
 
 (defn debug [state]
   (doto state
@@ -352,14 +358,9 @@ sometimes trivial but make compiled code more readable.
 (defn compile-symbol
   "Emits code that handles symbols (variable get/set, pop)"
   [sym]
-  (case sym
-    <pop> `(pop)
-    break> `(identity) ;; in clojure we break loops by default and
-    ;; logic has already been shifted around so breaks aren't needed
-    ;; TODO: make it so this symbol is always removed during
-    ;; normalization and no longer needs to compile to a no-op
-    
-    continue> '(recur) ;; normalization guaranteed this will be only
+  (condp = sym
+    pop-sym `(pop)
+    continue-sym '(recur) ;; normalization guaranteed this will be only
                        ;; in the tail position
     (if-let [var (parse-var-reference sym)]
       (let [[var set?] var]
@@ -455,11 +456,14 @@ sometimes trivial but make compiled code more readable.
         (if (not= break-cont-if? break-cont-else?) 
           ;; do the shift
           (list* (conj (vec up-to-if)
-                       (if break-cont-if?
-                         (concat [if-sym] if-clause [else-sym]
-                                 (shift-loop-breaks (concat else-clause remaining)))
-                         (concat [if-sym] (shift-loop-breaks (concat if-clause remaining))
-                                 [else-sym] else-clause))))
+                       (remove #{break-sym}
+                               (apply concat
+                                      [if-sym]
+                                      (if break-cont-if?
+                                        [if-clause [else-sym]
+                                         (shift-loop-breaks (concat else-clause remaining))]
+                                        [(shift-loop-breaks (concat if-clause remaining))
+                                         [else-sym] else-clause])))))
           (if break-cont-if?
             ;; break in both positions, nothing needs changing 
             body
@@ -526,12 +530,12 @@ sometimes trivial but make compiled code more readable.
 (defn compile-list
   "Emits code for a list item (if or invoke)"
   [[function & args]]
-  (case function
-    if> (compile-if args)
-    invoke> (compile-invoke args)
-    loop> (compile-loop args)
-    fn> (compile-fn args)
-    call> `(call (quote ~args))
+  (condp = function
+    if-sym (compile-if args)
+    invoke-sym (compile-invoke args)
+    loop-sym (compile-loop args)
+    fn-sym (compile-fn args)
+    call-sym `(call (quote ~args))
     (throw-error "Unknown function: %s" function)))
 
 (defn compile-item
@@ -577,43 +581,48 @@ sometimes trivial but make compiled code more readable.
 #+end_src
 
 #+RESULTS:
-| #'redplanetlabs.core/if-sym                |
-| #'redplanetlabs.core/else-sym              |
-| #'redplanetlabs.core/debug                 |
-| #'redplanetlabs.core/*debug*               |
-| #'redplanetlabs.core/-debug>               |
-| #'redplanetlabs.core/parse-var-reference   |
-| #'redplanetlabs.core/push                  |
-| #'redplanetlabs.core/compile-constant      |
-| #'redplanetlabs.core/throw-error           |
-| #'redplanetlabs.core/var-lookup            |
-| #'redplanetlabs.core/set-var               |
-| #'redplanetlabs.core/get-var               |
-| #'redplanetlabs.core/pop-item              |
-| #'redplanetlabs.core/pop                   |
-| #'redplanetlabs.core/compile-symbol        |
-| #'redplanetlabs.core/invoke                |
-| #'redplanetlabs.core/compile-invoke        |
-| #'redplanetlabs.core/threaded-if           |
-| #'redplanetlabs.core/compile-item          |
-| #'redplanetlabs.core/split-if              |
-| #'redplanetlabs.core/compile-if            |
-| #'redplanetlabs.core/check-break-if-clause |
-| #'redplanetlabs.core/if?                   |
-| #'redplanetlabs.core/add-loop-continue     |
-| #'redplanetlabs.core/shift-loop-breaks     |
-| #'redplanetlabs.core/threaded-loop         |
-| #'redplanetlabs.core/compile-loop          |
-| #'redplanetlabs.core/varargs?              |
-| #'redplanetlabs.core/count-arity           |
-| #'redplanetlabs.core/expand-arities        |
-| #'redplanetlabs.core/threaded-fn           |
-| #'redplanetlabs.core/compile-fn            |
-| #'redplanetlabs.core/call                  |
-| #'redplanetlabs.core/compile-list          |
-| #'redplanetlabs.core/compile-item          |
-| #'redplanetlabs.core/assign-initial-vars   |
-| #'redplanetlabs.core/defstackfn            |
+| #'redplanetlabs.core-test/if-sym                |
+| #'redplanetlabs.core-test/else-sym              |
+| #'redplanetlabs.core-test/loop-sym              |
+| #'redplanetlabs.core-test/break-sym             |
+| #'redplanetlabs.core-test/pop-sym               |
+| #'redplanetlabs.core-test/invoke-sym            |
+| #'redplanetlabs.core-test/call-sym              |
+| #'redplanetlabs.core-test/fn-sym                |
+| #'redplanetlabs.core-test/continue-sym          |
+| #'redplanetlabs.core-test/debug                 |
+| #'redplanetlabs.core-test/*debug*               |
+| #'redplanetlabs.core-test/-debug>               |
+| #'redplanetlabs.core-test/parse-var-reference   |
+| #'redplanetlabs.core-test/push                  |
+| #'redplanetlabs.core-test/compile-constant      |
+| #'redplanetlabs.core-test/throw-error           |
+| #'redplanetlabs.core-test/var-lookup            |
+| #'redplanetlabs.core-test/set-var               |
+| #'redplanetlabs.core-test/get-var               |
+| #'redplanetlabs.core-test/pop-item              |
+| #'redplanetlabs.core-test/pop                   |
+| #'redplanetlabs.core-test/compile-symbol        |
+| #'redplanetlabs.core-test/invoke                |
+| #'redplanetlabs.core-test/compile-invoke        |
+| #'redplanetlabs.core-test/threaded-if           |
+| #'redplanetlabs.core-test/compile-item          |
+| #'redplanetlabs.core-test/split-if              |
+| #'redplanetlabs.core-test/compile-if            |
+| #'redplanetlabs.core-test/check-break-if-clause |
+| #'redplanetlabs.core-test/if?                   |
+| #'redplanetlabs.core-test/add-loop-continue     |
+| #'redplanetlabs.core-test/shift-loop-breaks     |
+| #'redplanetlabs.core-test/threaded-loop         |
+| #'redplanetlabs.core-test/compile-loop          |
+| #'redplanetlabs.core-test/remove-ampersand      |
+| #'redplanetlabs.core-test/threaded-fn           |
+| #'redplanetlabs.core-test/compile-fn            |
+| #'redplanetlabs.core-test/call                  |
+| #'redplanetlabs.core-test/compile-list          |
+| #'redplanetlabs.core-test/compile-item          |
+| #'redplanetlabs.core-test/assign-initial-vars   |
+| #'redplanetlabs.core-test/defstackfn            |
 
 *** Tests
 #+begin_src clojure :tangle test/redplanetlabs/core_test.clj :results none
@@ -761,8 +770,10 @@ It's way easier to debug and run tests the way it is now, so to fix
 we'll just make defstackfn a thin wrapper around another macro and run
 all the tests with the inner macro.
 **** TODO Implement virtual method invokes
-**** TODO Define constants for all the languages' keywords
-**** TODO Make 'break' compile out to nothing instead of no-op code
+**** DONE Define constants for all the languages' keywords
+- State "DONE"       from "TODO"       [2022-08-17 Wed 18:35]
+**** DONE Make 'break' compile out to nothing instead of no-op code
+- State "DONE"       from "TODO"       [2022-08-17 Wed 18:35]
 **** TODO Allow bare fn arity when there's only one defined
 Like clojure's fn, if there's only one arity, don't make us wrap it in
 a list.
