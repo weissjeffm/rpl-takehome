@@ -500,10 +500,12 @@ sometimes trivial but make compiled code more readable.
                      ~@(for [[vars body] bodies]
                          `([state# ~@(vec vars)]
                            (let [captured# (update state# :vars merge (:vars ~orig))]
-                             (-debug> captured#
-                                      (assign-initial-vars (quote ~(remove-ampersand vars))
-                                                           ~(vec (remove-ampersand vars)))
-                                      ~@body)))))))))
+                             (assoc (-debug> captured#
+                                             (assign-initial-vars (quote ~(remove-ampersand vars))
+                                                                  ~(vec (remove-ampersand vars)))
+                                             ~@body)
+                                    :vars
+                                    (:vars ~orig))))))))))
 
 (defn compile-fn
   "Emits code for an anonymous function object"
