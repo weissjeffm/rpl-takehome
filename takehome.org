@@ -7,6 +7,7 @@
 #+HTML_HEAD: <script type="text/javascript" src="http://www.pirilampo.org/styles/lib/js/jquery.stickytableheaders.js"></script>
 #+HTML_HEAD: <script type="text/javascript" src="http://www.pirilampo.org/styles/readtheorg/js/readtheorg.js"></script>
 #+HTML_HEAD: <link rel="stylesheet" type="text/css" href="styles.css"/>
+#+TODO: TODO(t) INPROGRESS(i@/!) | DONE(d!) CANCELED(c@)
 
 #+TITLE: Take Home
 #+AUTHOR: Jeff Weiss
@@ -196,12 +197,38 @@ I am not sure what this means, since a "stack function" is a function
 of one argument: the stack. Perhaps this means you can implement the
 word =call>= to take additional arguments beyond the stack. This seems
 kind of silly, since you could just push the items onto the stack and
-then call the function. Maybe instead of taking arguments directly,
-the =call>= form will just take an argument count, which represents
-how many items to take from the stack and apply to the function. Even
-better would be to take the argument count from the stack, but this
-seems at odds with the design of =invoke>=.
+then call the function. It would be the difference between
+#+begin_src clojure
+(defstackfn foo ... 1 2 call>)
+#+end_src
+and
+#+begin_src clojure
+(defstackfn foo ... (call> 1 2))
+#+end_src
 
+Maybe instead of taking arguments directly, the =call>= form will just
+take an argument count, which represents how many items to take from
+the stack and apply to the function. Even better would be to take the
+argument count from the stack (which would restore multi-arity
+functionality), but this seems at odds with the design of =invoke>=.
+
+Let's go ahead and implement as-requested (with args passed in the
+invocation instead of via the stack).
+
+It would probably be the most efficient to compile directly to
+clojure's multi-arity functions (which would automatically handle
+calling the correct arity). The trickier part then is assigning the
+variables:
+
+#+begin_src clojure
+(fn [!x !y & !z]
+  ...)
+#+end_src
+
+Here, the =...= code we generate can have access to the arglist. So we
+can assign variables directly and do special handling for varargs,
+which just involves removing the ampersand (the rest of the values
+will be constants so we can easily pass them as a list).
 ** Implementation
 *** Project file
 #+begin_src clojure :tangle project.clj
@@ -375,7 +402,6 @@ sometimes trivial but make compiled code more readable.
 
 (declare compile-item)
 
-
 (defn split-if
   "Splits an if> body into a pair, [if-clause, else-clause]"
   [items]
@@ -424,7 +450,8 @@ sometimes trivial but make compiled code more readable.
     (if the-if
       (let [[if-clause else-clause :as clauses] (split-if the-if)
             [break-cont-if? break-cont-else?] (map check-break-if-clause clauses)]
-        (if (not= break-cont-if? break-cont-else?)
+        ;; if there's a break or continue in exactly one branch
+        (if (not= break-cont-if? break-cont-else?) 
           ;; do the shift
           (list* (conj (vec up-to-if)
                        (if break-cont-if?
@@ -457,20 +484,32 @@ sometimes trivial but make compiled code more readable.
   [body]
   `(threaded-loop ~(map compile-item (shift-loop-breaks body))))
 
+(defn remove-ampersand
+  "Removes the & from a list of values"
+  [values]
+  (remove #(= % '&) values))
+
 (defmacro threaded-fn
   "Expands from an expression that fits into the threading macro ->
    (in other words, takes the state as the first arg), to a let/fn
    that returns the new state"
-  [state vars body]
-  `(let [orig# ~state]
-     (push orig# (fn [state# args#]
-                   (let [captured# (update state# :vars merge (:vars orig#))]
-                     (-debug> captured# (assign-initial-vars (quote ~vars) args#)~@body))))))
+  [state bodies]
+  (let [orig (gensym "orig")]
+    `(let [~orig ~state]
+       (push ~orig (fn
+                     ~@(for [[vars body] bodies]
+                         `([state# ~@(vec vars)]
+                           (let [captured# (update state# :vars merge (:vars ~orig))]
+                             (-debug> captured#
+                                      (assign-initial-vars (quote ~(remove-ampersand vars))
+                                                           ~(vec (remove-ampersand vars)))
+                                      ~@body)))))))))
 
 (defn compile-fn
   "Emits code for an anonymous function object"
-  [[vars & body]]
-  `(threaded-fn ~vars ~(map compile-item body)))
+  [bodies]
+  `(threaded-fn ~(for [[vars & body] bodies]
+                   [vars (map compile-item body)])))
 
 (defn call
   "Calls anonymous function on ToS"
@@ -478,7 +517,7 @@ sometimes trivial but make compiled code more readable.
   (println state args)
   (let [[state tos] (pop-item state)]
     (if (fn? tos)
-      (tos state args)
+      (apply tos state args)
       (throw-error "Call attempted on value that isn't a function: %s", (pr-str tos)))))
 
 (defn compile-list
@@ -513,11 +552,11 @@ sometimes trivial but make compiled code more readable.
   [state vars values]
   (when (> (count vars) (count values))
     (throw-error "Not enought arguments to assign all variables"))
-  (let [;; discard the leading ! from var names
-        vars (map (comp first parse-var-reference) vars)
-        ;; match up var names to args (discarding anything leftover)
-        kvs (map vector vars values)]
-    (update state :vars merge (into {} kvs))))
+  (update state :vars merge
+          (let [;; discard the leading ! from var names
+                vars (map (comp first parse-var-reference) vars)]
+            ;; match up var names to args (discarding anything leftover)
+            (into {} (map vector vars values)))))
 
 (defmacro defstackfn
   "Compile a function with the name name-sym, and a list of variable
@@ -562,6 +601,9 @@ sometimes trivial but make compiled code more readable.
 | #'redplanetlabs.core/shift-loop-breaks     |
 | #'redplanetlabs.core/threaded-loop         |
 | #'redplanetlabs.core/compile-loop          |
+| #'redplanetlabs.core/varargs?              |
+| #'redplanetlabs.core/count-arity           |
+| #'redplanetlabs.core/expand-arities        |
 | #'redplanetlabs.core/threaded-fn           |
 | #'redplanetlabs.core/compile-fn            |
 | #'redplanetlabs.core/call                  |
@@ -696,3 +738,17 @@ sometimes trivial but make compiled code more readable.
   (is (= (closure) '(:yes :fnarg 4))))
 #+end_src
 
+*** Issues
+**** TODO Have defstackfn return ToS only
+It's way easier to debug and run tests the way it is now, so to fix
+we'll just make defstackfn a thin wrapper around another macro and run
+all the tests with the inner macro.
+**** TODO Implement virtual method invokes
+**** TODO Define constants for all the languages' keywords
+**** TODO Make 'break' compile out to nothing instead of no-op code
+**** TODO Allow bare fn arity when there's only one defined
+Like clojure's fn, if there's only one arity, don't make us wrap it in
+a list.
+**** INPROGRESS Varargs anonymous fns
+***** TODO More tests
+**** TODO Write more tests
