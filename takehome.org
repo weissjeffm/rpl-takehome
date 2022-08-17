@@ -250,7 +250,8 @@ can be a map with symbol keys. The symbols will be the names of the
 variables (with decorations =!= and =+= stripped).
 
 #+begin_src clojure :tangle src/redplanetlabs/core.clj :results none
-(ns redplanetlabs.core)
+(ns redplanetlabs.core
+  (:require [clojure.pprint]))
 
 (defrecord State [stack vars])
 
@@ -505,7 +506,7 @@ sometimes trivial but make compiled code more readable.
                                                                   ~(vec (remove-ampersand vars)))
                                              ~@body)
                                     :vars
-                                    (:vars ~orig))))))))))
+                                    (:vars state#))))))))))
 
 (defn compile-fn
   "Emits code for an anonymous function object"
@@ -700,8 +701,7 @@ sometimes trivial but make compiled code more readable.
           (invoke> inc 1) ;; [1] 2
           !x+
           !len ;; [1] 2 5
-          (invoke> <= 2)
-          )
+          (invoke> <= 2))
    (invoke> conj 2)
    !rows
    (invoke> inc 1)
@@ -711,11 +711,23 @@ sometimes trivial but make compiled code more readable.
 
 (sut/defstackfn closure []
   4 !x+
-  (fn> [!z] !x 4 (invoke> = 2)
-       (if> !z :yes
-            else> :no)) ;; capture x as 4
-  5 !x+ ;; change x
-  <pop> (call> :fnarg))
+  ;; capture x as 4
+  (fn> ([!z] !x 4 (invoke> = 2)
+        (if> !z :yes
+             27 !x+ <pop> ;; change x to 27 in inner scope
+             else> :no))) 
+  5 !x+ <pop> ;; change x in outer scope
+  (call> :fnarg)
+  ;; check that outer x is back after inner scope exits
+  !x)
+
+(sut/defstackfn varargs [!x !a]
+  (fn> ([!x] !x) ([!x & !y] !x !y))
+  ;; now overwrite x
+  !a
+  !x+
+  <pop>
+  (call> 1 2 3 4))
 
 (deftest example-test
   (is (= (example 1 2 4) '(24))))
@@ -737,7 +749,10 @@ sometimes trivial but make compiled code more readable.
   (is (= (loop-nested 3) '([[1 2 3] [1 2 3] [1 2 3]]))))
 
 (deftest lexical-closure-test
-  (is (= (closure) '(:yes :fnarg 4))))
+  (is (= (closure) '(5 :yes :fnarg 4))))
+
+(deftest varargs-test
+  (is (= (varargs 12 19) '((2 3 4) 1))))
 #+end_src
 
 *** Issues
