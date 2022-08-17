@@ -565,7 +565,7 @@ sometimes trivial but make compiled code more readable.
             ;; match up var names to args (discarding anything leftover)
             (into {} (map vector vars values)))))
 
-(defmacro defstackfn
+(defmacro defstackfn*
   "Compile a function with the name name-sym, and a list of variable
   names to assign at runtime to the arguments passed to the
   function. The function accepts a variable number of args."
@@ -578,6 +578,10 @@ sometimes trivial but make compiled code more readable.
     (clojure.pprint/pprint program)
     `(defn ~name-sym [& ~args-sym]
        ~program)))
+
+(defmacro defstackfn
+  [name-sym initial-vars & program]
+  `(first (defstackfn* ~name-sym ~initial-vars ~@program)))
 #+end_src
 
 #+RESULTS:
@@ -630,7 +634,7 @@ sometimes trivial but make compiled code more readable.
   (:require [clojure.test :refer :all]
             [redplanetlabs.core :as sut]))
 
-(sut/defstackfn example [!a !b !c] ; example uses input: 1 2 4. Stack starts empty.
+(sut/defstackfn* example [!a !b !c] ; example uses input: 1 2 4. Stack starts empty.
   !a ; 1
   !b ; 1 2
   (invoke> + 2) ; 3
@@ -656,7 +660,7 @@ sometimes trivial but make compiled code more readable.
     )
   )
 
-(sut/defstackfn nested-if [!y]
+(sut/defstackfn* nested-if [!y]
   !y !y
   (invoke> pos? 1)
   (if> !y
@@ -668,23 +672,23 @@ sometimes trivial but make compiled code more readable.
       (invoke> * 2))
     else> -99))
 
-(sut/defstackfn shadow [!x !y] !x !y !x+ !x)
+(sut/defstackfn* shadow [!x !y] !x !y !x+ !x)
 
-(sut/defstackfn looping []
+(sut/defstackfn* looping []
   1 true
   (loop> !x+ !x ;; hacky dup
          (invoke> + 2)
          !x+ !x 
          10000 (invoke> < 2)))
 
-(sut/defstackfn fib [!start !max]
+(sut/defstackfn* fib [!start !max]
   !start !start true
   (loop> !a+ <pop> !b+ <pop> !a !a !b
          (invoke> + 2) ;; 1 2
          !b !b 
          !max (invoke> < 2)))
 
-(sut/defstackfn loop-break1 [!start]
+(sut/defstackfn* loop-break1 [!start]
   !start true
   (loop> !x+ !x (invoke> dec 1)
          !x+ !x 5 (invoke> < 2)
@@ -692,7 +696,7 @@ sometimes trivial but make compiled code more readable.
            else>
            !x+ !x (invoke> pos? 1))))
 
-(sut/defstackfn loop-nested [!len]
+(sut/defstackfn* loop-nested [!len]
   1
   !rows+
   <pop>
@@ -718,7 +722,7 @@ sometimes trivial but make compiled code more readable.
    !len
    (invoke> <= 2)))
 
-(sut/defstackfn closure []
+(sut/defstackfn* closure []
   4 !x+
   ;; capture x as 4
   (fn> ([!z] !x 4 (invoke> = 2)
@@ -730,7 +734,7 @@ sometimes trivial but make compiled code more readable.
   ;; check that outer x is back after inner scope exits
   !x)
 
-(sut/defstackfn varargs [!x !a]
+(sut/defstackfn* varargs [!x !a]
   (fn> ([!x] !x) ([!x & !y] !x !y))
   ;; now overwrite x
   !a
@@ -765,7 +769,7 @@ sometimes trivial but make compiled code more readable.
 #+end_src
 
 *** Issues
-**** TODO Have defstackfn return ToS only
+**** DONE Have defstackfn return ToS only
 It's way easier to debug and run tests the way it is now, so to fix
 we'll just make defstackfn a thin wrapper around another macro and run
 all the tests with the inner macro.
