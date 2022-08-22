@@ -265,6 +265,7 @@ There are functions that create clojure code from =defstackfn= items
 and functions that do the work at runtime. The runtime functions are
 sometimes trivial but make compiled code more readable. 
 #+begin_src clojure :tangle src/redplanetlabs/core.clj
+;; Constants for all the language builtins
 (def if-sym 'if>)
 (def else-sym 'else>)
 (def loop-sym 'loop>)
@@ -275,17 +276,18 @@ sometimes trivial but make compiled code more readable.
 (def fn-sym 'fn>)
 (def continue-sym 'continue>)
 
-(defn debug [state]
-  (doto state
-    println))
+(defn debug
+  "Prints out the state before returning it"
+  [state]
+  (doto state println))
 
 (def ^:dynamic *debug* false)
 
 (defmacro -debug>
   "Optionally compile in debug statements to print state during each
-   step of execution. *debug* must be set to true, (`binding` to true
-   doesn't work since macroexpansion happens before the var is
-   rebound)"
+   step of execution. *debug* must be set to true before
+   macroexpansion, so can either redef it or eg (binding [*debug*
+   true] (eval '(defstackfn ...)))"
   [& body]
   (let [body (if *debug*
                (interpose `debug body)
@@ -424,7 +426,7 @@ sometimes trivial but make compiled code more readable.
   (when-not (symbol? f)
     (throw-error
      "Invalid invocation, function or method must be a symbol"
-                 (str f)))
+     (str f)))
   `(invoke ~(if (some-> f resolve var?)
               f
               (compile-java-interop f))
@@ -637,48 +639,53 @@ sometimes trivial but make compiled code more readable.
 #+end_src
 
 #+RESULTS:
-| #'redplanetlabs.core-test/if-sym                |
-| #'redplanetlabs.core-test/else-sym              |
-| #'redplanetlabs.core-test/loop-sym              |
-| #'redplanetlabs.core-test/break-sym             |
-| #'redplanetlabs.core-test/pop-sym               |
-| #'redplanetlabs.core-test/invoke-sym            |
-| #'redplanetlabs.core-test/call-sym              |
-| #'redplanetlabs.core-test/fn-sym                |
-| #'redplanetlabs.core-test/continue-sym          |
-| #'redplanetlabs.core-test/debug                 |
-| #'redplanetlabs.core-test/*debug*               |
-| #'redplanetlabs.core-test/-debug>               |
-| #'redplanetlabs.core-test/parse-var-reference   |
-| #'redplanetlabs.core-test/push                  |
-| #'redplanetlabs.core-test/compile-constant      |
-| #'redplanetlabs.core-test/throw-error           |
-| #'redplanetlabs.core-test/var-lookup            |
-| #'redplanetlabs.core-test/set-var               |
-| #'redplanetlabs.core-test/get-var               |
-| #'redplanetlabs.core-test/pop-item              |
-| #'redplanetlabs.core-test/pop                   |
-| #'redplanetlabs.core-test/compile-symbol        |
-| #'redplanetlabs.core-test/invoke                |
-| #'redplanetlabs.core-test/compile-invoke        |
-| #'redplanetlabs.core-test/threaded-if           |
-| #'redplanetlabs.core-test/compile-item          |
-| #'redplanetlabs.core-test/split-if              |
-| #'redplanetlabs.core-test/compile-if            |
-| #'redplanetlabs.core-test/check-break-if-clause |
-| #'redplanetlabs.core-test/if?                   |
-| #'redplanetlabs.core-test/add-loop-continue     |
-| #'redplanetlabs.core-test/shift-loop-breaks     |
-| #'redplanetlabs.core-test/threaded-loop         |
-| #'redplanetlabs.core-test/compile-loop          |
-| #'redplanetlabs.core-test/remove-ampersand      |
-| #'redplanetlabs.core-test/threaded-fn           |
-| #'redplanetlabs.core-test/compile-fn            |
-| #'redplanetlabs.core-test/call                  |
-| #'redplanetlabs.core-test/compile-list          |
-| #'redplanetlabs.core-test/compile-item          |
-| #'redplanetlabs.core-test/assign-initial-vars   |
-| #'redplanetlabs.core-test/defstackfn            |
+| #'redplanetlabs.core/if-sym                 |
+| #'redplanetlabs.core/else-sym               |
+| #'redplanetlabs.core/loop-sym               |
+| #'redplanetlabs.core/break-sym              |
+| #'redplanetlabs.core/pop-sym                |
+| #'redplanetlabs.core/invoke-sym             |
+| #'redplanetlabs.core/call-sym               |
+| #'redplanetlabs.core/fn-sym                 |
+| #'redplanetlabs.core/continue-sym           |
+| #'redplanetlabs.core/debug                  |
+| #'redplanetlabs.core/*debug*                |
+| #'redplanetlabs.core/-debug>                |
+| #'redplanetlabs.core/parse-var-reference    |
+| #'redplanetlabs.core/push                   |
+| #'redplanetlabs.core/compile-constant       |
+| #'redplanetlabs.core/throw-error            |
+| #'redplanetlabs.core/var-lookup             |
+| #'redplanetlabs.core/set-var                |
+| #'redplanetlabs.core/get-var                |
+| #'redplanetlabs.core/pop-item               |
+| #'redplanetlabs.core/pop                    |
+| #'redplanetlabs.core/compile-symbol         |
+| #'redplanetlabs.core/invoke-instance-method |
+| #'redplanetlabs.core/invoke-static-method   |
+| #'redplanetlabs.core/invoke                 |
+| #'redplanetlabs.core/compile-java-interop   |
+| #'redplanetlabs.core/compile-invoke         |
+| #'redplanetlabs.core/threaded-if            |
+| #'redplanetlabs.core/compile-item           |
+| #'redplanetlabs.core/split-if               |
+| #'redplanetlabs.core/compile-if             |
+| #'redplanetlabs.core/check-break-if-clause  |
+| #'redplanetlabs.core/if?                    |
+| #'redplanetlabs.core/add-loop-continue      |
+| #'redplanetlabs.core/shift-loop-breaks      |
+| #'redplanetlabs.core/threaded-loop          |
+| #'redplanetlabs.core/compile-loop           |
+| #'redplanetlabs.core/remove-ampersand       |
+| #'redplanetlabs.core/threaded-fn            |
+| #'redplanetlabs.core/compile-fn             |
+| #'redplanetlabs.core/call                   |
+| #'redplanetlabs.core/compile-list           |
+| #'redplanetlabs.core/compile-item           |
+| #'redplanetlabs.core/assign-initial-vars    |
+| #'redplanetlabs.core/stackfn-body           |
+| #'redplanetlabs.core/defstackfn*            |
+| #'redplanetlabs.core/defstackfn             |
 
 *** Tests
 #+begin_src clojure :tangle test/redplanetlabs/core_test.clj :results none
@@ -794,6 +801,9 @@ sometimes trivial but make compiled code more readable.
   <pop>
   (call> 1 2 3 4))
 
+(sut/defstackfn* java [!x !y]
+  !x (invoke> Math/abs 1) (invoke> .toString 1) !y (invoke> .contains 2))
+
 (deftest example-test
   (is (= (example 1 2 4) '(24))))
 
@@ -818,6 +828,16 @@ sometimes trivial but make compiled code more readable.
 
 (deftest varargs-test
   (is (= (varargs 12 19) '((2 3 4) 1))))
+
+(deftest java-test
+  (is (= (java -140 "4") '(true)))
+  (is (= (java -140 "5") '(false))))
+
+(deftest compiler-error-tests
+  ;; Can't have 2 overloads with same arity
+  (is (thrown-with-msg? clojure.lang.Compiler$CompilerException
+               #"Syntax error"
+               (eval '(sut/defstackfn foo [] (fn> ([]) ([])))))))
 #+end_src
 
 *** Issues
