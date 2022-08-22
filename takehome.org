@@ -251,7 +251,8 @@ variables (with decorations =!= and =+= stripped).
 
 #+begin_src clojure :tangle src/redplanetlabs/core.clj :results none
 (ns redplanetlabs.core
-  (:require [clojure.pprint]))
+  (:require [clojure.pprint]
+            [clojure.string :as string]))
 
 (defrecord State [stack vars])
 
@@ -281,6 +282,10 @@ sometimes trivial but make compiled code more readable.
 (def ^:dynamic *debug* false)
 
 (defmacro -debug>
+  "Optionally compile in debug statements to print state during each
+   step of execution. *debug* must be set to true, (`binding` to true
+   doesn't work since macroexpansion happens before the var is
+   rebound)"
   [& body]
   (let [body (if *debug*
                (interpose `debug body)
@@ -360,12 +365,34 @@ sometimes trivial but make compiled code more readable.
   [sym]
   (condp = sym
     pop-sym `(pop)
-    continue-sym '(recur) ;; normalization guaranteed this will be only
-                       ;; in the tail position
+    continue-sym '(recur) ;; normalization guarantees this will be only
+    ;; in the tail position
     (if-let [var (parse-var-reference sym)]
       (let [[var set?] var]
         `(~(if set? `set-var `get-var) (quote ~var)))
       (throw-error "Unknown variable or symbol: %s" (name sym)))))
+
+(defn invoke-instance-method
+  "Returns a function that invokes the given method on the first of
+  its args and passes in the rest of the args to that method."
+  [method-name]
+  (fn [& args]
+    (clojure.lang.Reflector/invokeInstanceMethod
+     (first args)
+     method-name
+     (into-array Object (rest args)))))
+
+(defn invoke-static-method
+  "Returns a function that invokes the given static method (in the
+  form 'Class/staticMethod')"
+  [method-name]
+  (let [[clazz method] (string/split method-name #"/")
+        clazz (-> clazz symbol resolve)]
+    (fn [& args]
+      (clojure.lang.Reflector/invokeStaticMethod
+       clazz
+       method
+       (into-array Object args)))))
 
 (defn invoke
   "Calls f with args taken from the top of the stack. Arity sets the
@@ -382,15 +409,26 @@ sometimes trivial but make compiled code more readable.
          (conj stack)
          (assoc state :stack))))
 
+(defn compile-java-interop
+  [sym]
+  (let [s (str sym)]
+    (cond
+      (.startsWith s ".") `(invoke-instance-method (subs ~s 1))
+      (some #{\/} s) `(invoke-static-method ~s))))
+
 (defn compile-invoke
   "Emits code for invoke>"
   [[f arity]]
   (when (or (not (integer? arity)) (neg? arity))
     (throw-error "Invalid arity: %s" arity))
   (when-not (symbol? f)
-    (throw-error "Invalid invocation, function must be a symbol"
+    (throw-error
+     "Invalid invocation, function or method must be a symbol"
                  (str f)))
-  `(invoke ~f ~arity))
+  `(invoke ~(if (some-> f resolve var?)
+              f
+              (compile-java-interop f))
+           ~arity))
 
 (defmacro threaded-if
   "Expands from an expression that fits into the threading macro ->
@@ -501,16 +539,18 @@ sometimes trivial but make compiled code more readable.
   [state bodies]
   (let [orig (gensym "orig")]
     `(let [~orig ~state]
-       (push ~orig (fn
-                     ~@(for [[vars body] bodies]
-                         `([state# ~@(vec vars)]
-                           (let [captured# (update state# :vars merge (:vars ~orig))]
-                             (assoc (-debug> captured#
-                                             (assign-initial-vars (quote ~(remove-ampersand vars))
-                                                                  ~(vec (remove-ampersand vars)))
-                                             ~@body)
-                                    :vars
-                                    (:vars state#))))))))))
+       (push ~orig
+             (fn
+               ~@(for [[vars body] bodies]
+                   `([state# ~@(vec vars)]
+                     (let [captured# (update state# :vars merge (:vars ~orig))]
+                       (assoc (-debug> captured#
+                                       (assign-initial-vars (quote ~(remove-ampersand vars))
+                                                            ~(vec (remove-ampersand vars)))
+                                       ~@body)
+                              :vars
+                              ;; restore previous scope
+                              (:vars state#))))))))))
 
 (defn compile-fn
   "Emits code for an anonymous function object"
@@ -521,7 +561,7 @@ sometimes trivial but make compiled code more readable.
 (defn call
   "Calls anonymous function on ToS"
   [state args]
-  (println state args)
+  ;;(println state args)
   (let [[state tos] (pop-item state)]
     (if (fn? tos)
       (apply tos state args)
@@ -565,23 +605,35 @@ sometimes trivial but make compiled code more readable.
             ;; match up var names to args (discarding anything leftover)
             (into {} (map vector vars values)))))
 
+(defn stackfn-body
+  [args-sym initial-vars program]
+  `(-debug> (new-state)
+            (assign-initial-vars (quote ~initial-vars) ~args-sym)
+            ~@(map compile-item program)
+            :stack))
+
 (defmacro defstackfn*
   "Compile a function with the name name-sym, and a list of variable
   names to assign at runtime to the arguments passed to the
-  function. The function accepts a variable number of args."
+  function. The function accepts a variable number of args and returns
+  the entire stack."
   [name-sym initial-vars & program]
-  (let [args-sym (gensym "args")
-        program `(-debug> (new-state)
-                         (assign-initial-vars (quote ~initial-vars) ~args-sym)
-                         ~@(map compile-item program)
-                         :stack)]
+  (let [args-sym (gensym "args")]
     (clojure.pprint/pprint program)
     `(defn ~name-sym [& ~args-sym]
-       ~program)))
+       ~(stackfn-body args-sym initial-vars program))))
 
 (defmacro defstackfn
+  "Compile a function with the name name-sym, and a list of variable
+  names to assign at runtime to the arguments passed to the
+  function. The function accepts a variable number of args and returns
+  the top stack item (or nil if empty)."
   [name-sym initial-vars & program]
-  `(first (defstackfn* ~name-sym ~initial-vars ~@program)))
+  (let [args-sym (gensym "args")]
+    (clojure.pprint/pprint program)
+    `(defn ~name-sym [& ~args-sym]
+       (first ~(stackfn-body args-sym initial-vars program)))))
+
 #+end_src
 
 #+RESULTS:
@@ -773,7 +825,10 @@ sometimes trivial but make compiled code more readable.
 It's way easier to debug and run tests the way it is now, so to fix
 we'll just make defstackfn a thin wrapper around another macro and run
 all the tests with the inner macro.
-**** TODO Implement virtual method invokes
+***** DONE Fix defstackfn macro
+- State "DONE"       from "TODO"       [2022-08-21 Sun 21:41]
+**** INPROGRESS Implement virtual method invokes
+- State "INPROGRESS" from "TODO"       [2022-08-21 Sun 21:08]
 **** DONE Define constants for all the languages' keywords
 - State "DONE"       from "TODO"       [2022-08-17 Wed 18:35]
 **** DONE Make 'break' compile out to nothing instead of no-op code
@@ -784,3 +839,5 @@ a list.
 **** INPROGRESS Varargs anonymous fns
 ***** TODO More tests
 **** TODO Write more tests
+**** DONE Fix debug macro
+- State "DONE"       from "TODO"       [2022-08-21 Sun 21:41]
