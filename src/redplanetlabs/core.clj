@@ -17,17 +17,18 @@
 (def fn-sym 'fn>)
 (def continue-sym 'continue>)
 
-(defn debug [state]
-  (doto state
-    println))
+(defn debug
+  "Prints out the state before returning it"
+  [state]
+  (doto state println))
 
 (def ^:dynamic *debug* false)
 
 (defmacro -debug>
   "Optionally compile in debug statements to print state during each
-   step of execution. *debug* must be set to true, (`binding` to true
-   doesn't work since macroexpansion happens before the var is
-   rebound)"
+   step of execution. *debug* must be set to true before
+   macroexpansion, so can either redef it or eg (binding [*debug*
+   true] (eval '(defstackfn ...)))"
   [& body]
   (let [body (if *debug*
                (interpose `debug body)
@@ -166,7 +167,7 @@
   (when-not (symbol? f)
     (throw-error
      "Invalid invocation, function or method must be a symbol"
-                 (str f)))
+     (str f)))
   `(invoke ~(if (some-> f resolve var?)
               f
               (compile-java-interop f))
@@ -223,8 +224,8 @@
     (-> body last (not= 'continue>)) (-> vec (conj 'continue>) list*)))
 
 (defn shift-loop-breaks
-  "If a loop body contains an if that contains a 'break/continue' in
-   one branch, move the rest of the body following the if into the
+  "If a loop body contains an `if` that contains a 'break/continue' in
+   one branch, move the rest of the body following the `if` into the
    other branch, then recurse into that joined branch. Throws
    exception if break/continue isn't in tail position"
   [body]
@@ -287,8 +288,12 @@
                    `([state# ~@(vec vars)]
                      (let [captured# (update state# :vars merge (:vars ~orig))]
                        (assoc (-debug> captured#
-                                       (assign-initial-vars (quote ~(remove-ampersand vars))
-                                                            ~(vec (remove-ampersand vars)))
+                                       (assign-initial-vars
+
+                                        (quote ~(remove-ampersand vars))
+
+
+                                        ~(vec (remove-ampersand vars)))
                                        ~@body)
                               :vars
 
@@ -301,9 +306,9 @@
                    [vars (map compile-item body)])))
 
 (defn call
-  "Calls anonymous function on ToS"
+  "Calls anonymous function on ToS, puts return value onto
+  stack. Function and its args are consumed."
   [state args]
-
   (let [[state tos] (pop-item state)]
     (if (fn? tos)
       (apply tos state args)
@@ -348,6 +353,9 @@
             (into {} (map vector vars values)))))
 
 (defn stackfn-body
+  "Generates the body of a defn and places the compiled program in
+   it. Args-sym is the symbol for the arguments to defstackfn in the
+   defn's arglist."
   [args-sym initial-vars program]
   `(-debug> (new-state)
             (assign-initial-vars (quote ~initial-vars) ~args-sym)
@@ -358,10 +366,9 @@
   "Compile a function with the name name-sym, and a list of variable
   names to assign at runtime to the arguments passed to the
   function. The function accepts a variable number of args and returns
-  the entire stack."
+  the entire stack (helpful for debugging)."
   [name-sym initial-vars & program]
   (let [args-sym (gensym "args")]
-    (clojure.pprint/pprint program)
     `(defn ~name-sym [& ~args-sym]
        ~(stackfn-body args-sym initial-vars program))))
 
@@ -372,6 +379,5 @@
   the top stack item (or nil if empty)."
   [name-sym initial-vars & program]
   (let [args-sym (gensym "args")]
-    (clojure.pprint/pprint program)
     `(defn ~name-sym [& ~args-sym]
        (first ~(stackfn-body args-sym initial-vars program)))))

@@ -110,6 +110,9 @@
   <pop>
   (call> 1 2 3 4))
 
+(sut/defstackfn* java [!x !y]
+  !x (invoke> Math/abs 1) (invoke> .toString 1) !y (invoke> .contains 2))
+
 (deftest example-test
   (is (= (example 1 2 4) '(24))))
 
@@ -134,3 +137,13 @@
 
 (deftest varargs-test
   (is (= (varargs 12 19) '((2 3 4) 1))))
+
+(deftest java-test
+  (is (= (java -140 "4") '(true)))
+  (is (= (java -140 "5") '(false))))
+
+(deftest compiler-error-tests
+
+  (is (thrown-with-msg? clojure.lang.Compiler$CompilerException
+               #"Syntax error"
+               (eval '(sut/defstackfn foo [] (fn> ([]) ([])))))))

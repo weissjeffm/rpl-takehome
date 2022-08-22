@@ -125,7 +125,7 @@ the time, if there's a recur already somewhere nested in the
 body. Then that inner recur is no longer in tail position and the
 clojure compiler doesn't allow it.
 
-There are several possible approaches to deal with this problem:
+There is an approach to deal with this problem:
 **** Rewrite the body so that each branch ends with its own recur
 #+begin_src
 (loop> x (if> break else> 2) 3)
@@ -170,6 +170,8 @@ Should we rewrite the stackish and then compile?
 #+begin_src 
 (loop x (if> 6 break else> 2 5 (if> 7 break> else> 4 11)))
 #+end_src
+
+I think that is the way to go.
 *** Anonymous stack functions
 The basic idea here is to compile something like
 #+begin_src 
@@ -212,6 +214,10 @@ the stack and apply to the function. Even better would be to take the
 argument count from the stack (which would restore multi-arity
 functionality), but this seems at odds with the design of =invoke>=.
 
+Having words that take varying numbers of items from the stack is
+generally considered bad form in stack-based langs, but =invoke>=
+already violates that so I think we can ignore this issue.
+
 Let's go ahead and implement as-requested (with args passed in the
 invocation instead of via the stack).
 
@@ -228,7 +234,7 @@ variables:
 Here, the =...= code we generate can have access to the arglist. So we
 can assign variables directly and do special handling for varargs,
 which just involves removing the ampersand (the rest of the values
-will be constants so we can easily pass them as a list).
+will be constants so we can easily pass them as an evaluated list).
 ** Implementation
 *** Project file
 #+begin_src clojure :tangle project.clj
@@ -483,8 +489,8 @@ sometimes trivial but make compiled code more readable.
     (-> body last (not= 'continue>)) (-> vec (conj 'continue>) list*)))
 
 (defn shift-loop-breaks
-  "If a loop body contains an if that contains a 'break/continue' in
-   one branch, move the rest of the body following the if into the
+  "If a loop body contains an `if` that contains a 'break/continue' in
+   one branch, move the rest of the body following the `if` into the
    other branch, then recurse into that joined branch. Throws
    exception if break/continue isn't in tail position"
   [body]
@@ -547,8 +553,12 @@ sometimes trivial but make compiled code more readable.
                    `([state# ~@(vec vars)]
                      (let [captured# (update state# :vars merge (:vars ~orig))]
                        (assoc (-debug> captured#
-                                       (assign-initial-vars (quote ~(remove-ampersand vars))
-                                                            ~(vec (remove-ampersand vars)))
+                                       (assign-initial-vars
+                                        ;; the quoted var symbols
+                                        (quote ~(remove-ampersand vars))
+                                        ;; the var symbols evaluated
+                                        ;; to their actual values
+                                        ~(vec (remove-ampersand vars)))
                                        ~@body)
                               :vars
                               ;; restore previous scope
@@ -561,9 +571,9 @@ sometimes trivial but make compiled code more readable.
                    [vars (map compile-item body)])))
 
 (defn call
-  "Calls anonymous function on ToS"
+  "Calls anonymous function on ToS, puts return value onto
+  stack. Function and its args are consumed."
   [state args]
-  ;;(println state args)
   (let [[state tos] (pop-item state)]
     (if (fn? tos)
       (apply tos state args)
@@ -608,6 +618,9 @@ sometimes trivial but make compiled code more readable.
             (into {} (map vector vars values)))))
 
 (defn stackfn-body
+  "Generates the body of a defn and places the compiled program in
+   it. Args-sym is the symbol for the arguments to defstackfn in the
+   defn's arglist."
   [args-sym initial-vars program]
   `(-debug> (new-state)
             (assign-initial-vars (quote ~initial-vars) ~args-sym)
@@ -618,10 +631,9 @@ sometimes trivial but make compiled code more readable.
   "Compile a function with the name name-sym, and a list of variable
   names to assign at runtime to the arguments passed to the
   function. The function accepts a variable number of args and returns
-  the entire stack."
+  the entire stack (helpful for debugging)."
   [name-sym initial-vars & program]
   (let [args-sym (gensym "args")]
-    (clojure.pprint/pprint program)
     `(defn ~name-sym [& ~args-sym]
        ~(stackfn-body args-sym initial-vars program))))
 
@@ -632,10 +644,8 @@ sometimes trivial but make compiled code more readable.
   the top stack item (or nil if empty)."
   [name-sym initial-vars & program]
   (let [args-sym (gensym "args")]
-    (clojure.pprint/pprint program)
     `(defn ~name-sym [& ~args-sym]
        (first ~(stackfn-body args-sym initial-vars program)))))
-
 #+end_src
 
 #+RESULTS:
@@ -849,15 +859,21 @@ all the tests with the inner macro.
 - State "DONE"       from "TODO"       [2022-08-21 Sun 21:41]
 **** INPROGRESS Implement virtual method invokes
 - State "INPROGRESS" from "TODO"       [2022-08-21 Sun 21:08]
+***** TODO Implement constructor calls
 **** DONE Define constants for all the languages' keywords
 - State "DONE"       from "TODO"       [2022-08-17 Wed 18:35]
 **** DONE Make 'break' compile out to nothing instead of no-op code
 - State "DONE"       from "TODO"       [2022-08-17 Wed 18:35]
-**** TODO Allow bare fn arity when there's only one defined
+**** CANCELED Allow bare fn arity when there's only one defined
+- State "CANCELED"   from "TODO"       [2022-08-22 Mon 15:50] \\
+  It's too hard to tell the visual difference between a function body
+  and an invocation of invoke> or if> or call>. Just keep the
+  requirement that even a single function body has to be wrapped.
 Like clojure's fn, if there's only one arity, don't make us wrap it in
 a list.
-**** INPROGRESS Varargs anonymous fns
+**** DONE Varargs anonymous fns
+- State "DONE"       from "INPROGRESS" [2022-08-22 Mon 15:52]
 ***** TODO More tests
-**** TODO Write more tests
+**** INPROGRESS Write more tests
 **** DONE Fix debug macro
 - State "DONE"       from "TODO"       [2022-08-21 Sun 21:41]
