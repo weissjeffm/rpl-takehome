@@ -379,7 +379,9 @@ sometimes trivial but make compiled code more readable.
     (if-let [var (parse-var-reference sym)]
       (let [[var set?] var]
         `(~(if set? `set-var `get-var) (quote ~var)))
-      (throw-error "Unknown variable or symbol: %s" (name sym)))))
+      (if (= sym break-sym)
+        (throw-error "break> is only allowed in conditionals inside a loop")
+        (throw-error "Unknown variable or symbol: %s" (name sym))))))
 
 (defn invoke-instance-method
   "Returns a function that invokes the given method on the first of
@@ -883,7 +885,11 @@ sometimes trivial but make compiled code more readable.
     `(sut/defstackfn foo [] (invoke> :unknownFn 2)) ;; unresolvable 
     `(sut/defstackfn foo [] (fn> ([]) ([]))) ;; two bodies with same arity
     `(sut/defstackfn foo [] (loop> (if> 1 break> 2 else> 3)))
-    `(sut/defstackfn foo [] ()))) 
+    `(sut/defstackfn foo [] break>) ;; break> not allowed outside loop
+    `(sut/defstackfn foo [] (loop> break>)) ;; unconditional break> not allowed
+    `(sut/defstackfn foo [] continue>) ;; continue not allowed outside loop
+    `(sut/defstackfn foo [] ())))
+    
 #+end_src
 
 *** Issues

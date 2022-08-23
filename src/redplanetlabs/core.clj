@@ -114,7 +114,9 @@
     (if-let [var (parse-var-reference sym)]
       (let [[var set?] var]
         `(~(if set? `set-var `get-var) (quote ~var)))
-      (throw-error "Unknown variable or symbol: %s" (name sym)))))
+      (if (= sym break-sym)
+        (throw-error "break> is only allowed in conditionals inside a loop")
+        (throw-error "Unknown variable or symbol: %s" (name sym))))))
 
 (defn invoke-instance-method
   "Returns a function that invokes the given method on the first of
