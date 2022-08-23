@@ -161,17 +161,17 @@
   (is (= (loop-continue 30) '(4 28))))
 
 (deftest compiler-error-tests
-  (are [stackfn] (thrown-with-msg? clojure.lang.Compiler$CompilerException
+  (are [body] (thrown-with-msg? clojure.lang.Compiler$CompilerException
                                    #"Syntax error"
-                                   (eval stackfn))
-    `(sut/defstackfn foo [] (unknownFn 1))
-    `(sut/defstackfn foo [] unknownFn)
-    `(sut/defstackfn foo [] (invoke> +)) ;; no arity
-    `(sut/defstackfn foo [] (invoke> + :badarity)) 
-    `(sut/defstackfn foo [] (invoke> :unknownFn 2)) ;; unresolvable 
-    `(sut/defstackfn foo [] (fn> ([]) ([]))) ;; two bodies with same arity
-    `(sut/defstackfn foo [] (loop> (if> 1 break> 2 else> 3)))
-    `(sut/defstackfn foo [] break>) ;; break> not allowed outside loop
-    `(sut/defstackfn foo [] (loop> break>)) ;; unconditional break> not allowed
-    `(sut/defstackfn foo [] continue>) ;; continue not allowed outside loop
-    `(sut/defstackfn foo [] ())))
+                                   (eval `(sut/defstackfn foo [] ~@body)))
+    `[(unknownFn 1)]
+    `[unknownFn]
+    `[(invoke> +)] ;; no arity
+    `[(invoke> + :badarity)] 
+    `[(invoke> :unknownFn 2)] ;; unresolvable 
+    `[(fn> ([]) ([]))] ;; two bodies with same arity
+    `[(loop> (if> 1 break> 2 else> 3))] ;; break> must be tail position
+    `[break>] ;; break> not allowed outside loop
+    `[(loop> break>)] ;; unconditional break> not allowed
+    `[continue>] ;; continue not allowed outside loop
+    `[()]))
