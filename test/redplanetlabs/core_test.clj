@@ -170,4 +170,5 @@
     `(sut/defstackfn foo [] (invoke> + :badarity)) 
     `(sut/defstackfn foo [] (invoke> :unknownFn 2)) ;; unresolvable 
     `(sut/defstackfn foo [] (fn> ([]) ([]))) ;; two bodies with same arity
+    `(sut/defstackfn foo [] (loop> (if> 1 break> 2 else> 3)))
     `(sut/defstackfn foo [] ())))

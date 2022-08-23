@@ -470,10 +470,9 @@ sometimes trivial but make compiled code more readable.
 (defn compile-if
   "Emits code for if> else>"
   [items]
-  (let [[if-clause else-clause] (split-if items)
-        compiled-if (map compile-item if-clause)
-        compiled-else (map compile-item else-clause)]
-    `(threaded-if ~compiled-if ~compiled-else)))
+  (let [[if-clause else-clause] (split-if items)]
+    `(threaded-if ~(map compile-item if-clause)
+                  ~(map compile-item else-clause))))
 
 (defn check-break-if-clause
   "Checks if the clause has break/continue. Returns true if it is
@@ -883,6 +882,7 @@ sometimes trivial but make compiled code more readable.
     `(sut/defstackfn foo [] (invoke> + :badarity)) 
     `(sut/defstackfn foo [] (invoke> :unknownFn 2)) ;; unresolvable 
     `(sut/defstackfn foo [] (fn> ([]) ([]))) ;; two bodies with same arity
+    `(sut/defstackfn foo [] (loop> (if> 1 break> 2 else> 3)))
     `(sut/defstackfn foo [] ()))) 
 #+end_src
 

@@ -205,10 +205,9 @@
 (defn compile-if
   "Emits code for if> else>"
   [items]
-  (let [[if-clause else-clause] (split-if items)
-        compiled-if (map compile-item if-clause)
-        compiled-else (map compile-item else-clause)]
-    `(threaded-if ~compiled-if ~compiled-else)))
+  (let [[if-clause else-clause] (split-if items)]
+    `(threaded-if ~(map compile-item if-clause)
+                  ~(map compile-item else-clause))))
 
 (defn check-break-if-clause
   "Checks if the clause has break/continue. Returns true if it is
