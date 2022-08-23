@@ -62,20 +62,13 @@
          !x+ !x 5 (invoke> < 2)
          (if> break>
            else>
-           !x+ !x (invoke> pos? 1))))
+           !x+ !x)
+         (invoke> pos? 1)))
 
-(sut/defstackfn* loop-nested [!len]
-  1
-  !rows+
-  <pop>
-  []
-  true
+(sut/defstackfn* make-square [!len]
+  1 !rows+ <pop> [] true
   (loop>
-   []
-   1
-   !x+
-   <pop> 
-   true ;; [] true
+   [] 1 !x+ <pop> true ;; [] true
    (loop> !x ;; [] 1
           (invoke> conj 2) ;; [1]
           !x ;; [1] 1
@@ -89,6 +82,17 @@
    !rows+
    !len
    (invoke> <= 2)))
+
+(sut/defstackfn* loop-continue [!x]
+  !x
+  2 (invoke> > 2) ;; if > 2 loop
+  (loop>
+   !x 3 (invoke> mod 2) 0 (invoke> = 2) ;; divisible by 3
+   (if> !x 2 (invoke> - 2) !x+ true continue> ;; subtract 2 from x, leave item on stack
+        else>
+        !x 10 (invoke> - 2)) ;; subtract 10
+   (invoke> dec 1) !x+ ;; dec and set x
+   2 (invoke> > 2)))
 
 (sut/defstackfn* closure []
   4 !x+
@@ -110,8 +114,16 @@
   <pop>
   (call> 1 2 3 4))
 
+(sut/defstackfn* multiple-call [!x]
+  (fn> ([!y] !x !y (invoke> + 2)))
+  !f+
+  (call> 4)
+  !f
+  (call> 5))
+
 (sut/defstackfn* java [!x !y]
-  !x (invoke> Math/abs 1) (invoke> .toString 1) !y (invoke> .contains 2))
+  !x (invoke> Math/abs 1) (invoke> .toString 1) !y (invoke> .contains 2)
+  (invoke> String. 0) (invoke> .length 1) 0 (invoke> = 2))
 
 (deftest example-test
   (is (= (example 1 2 4) '(24))))
@@ -130,20 +142,32 @@
   (is (= (loop-break1 7 '(7 6 5 4)))))
 
 (deftest nested-loop-test
-  (is (= (loop-nested 3) '([[1 2 3] [1 2 3] [1 2 3]]))))
+  (is (= (make-square 3) '([[1 2 3] [1 2 3] [1 2 3]]))))
 
 (deftest lexical-closure-test
   (is (= (closure) '(5 :yes :fnarg 4))))
+
+(deftest multiple-call-test
+  (is (= (multiple-call 11) '(16 15))))
 
 (deftest varargs-test
   (is (= (varargs 12 19) '((2 3 4) 1))))
 
 (deftest java-test
-  (is (= (java -140 "4") '(true)))
-  (is (= (java -140 "5") '(false))))
+  (is (= (java -140 "4") '(true true)))
+  (is (= (java -140 "5") '(true false))))
+
+(deftest continue-test
+  (is (= (loop-continue 30) '(4 28))))
 
 (deftest compiler-error-tests
-
-  (is (thrown-with-msg? clojure.lang.Compiler$CompilerException
-               #"Syntax error"
-               (eval '(sut/defstackfn foo [] (fn> ([]) ([])))))))
+  (are [stackfn] (thrown-with-msg? clojure.lang.Compiler$CompilerException
+                                   #"Syntax error"
+                                   (eval stackfn))
+    `(sut/defstackfn foo [] (unknownFn 1))
+    `(sut/defstackfn foo [] unknownFn)
+    `(sut/defstackfn foo [] (invoke> +)) ;; no arity
+    `(sut/defstackfn foo [] (invoke> + :badarity)) 
+    `(sut/defstackfn foo [] (invoke> :unknownFn 2)) ;; unresolvable 
+    `(sut/defstackfn foo [] (fn> ([]) ([]))) ;; two bodies with same arity
+    `(sut/defstackfn foo [] ())))

@@ -1,6 +1,7 @@
 (ns redplanetlabs.core
   (:require [clojure.pprint]
-            [clojure.string :as string]))
+            [clojure.string :as string])
+  (:refer-clojure :exclude [pop]))
 
 (defrecord State [stack vars])
 
@@ -106,7 +107,7 @@
 (defn compile-symbol
   "Emits code that handles symbols (variable get/set, pop)"
   [sym]
-  (condp = sym
+  (condp = (-> sym name symbol) ;; remove namespacing
     pop-sym `(pop)
     continue-sym '(recur) ;; normalization guarantees this will be only
 
@@ -137,6 +138,14 @@
        method
        (into-array Object args)))))
 
+(defn invoke-constructor
+  "Returns a function that invokes the given constructor"
+  [clazzname]
+  (fn [& args]
+    (clojure.lang.Reflector/invokeConstructor
+     (class clazzname)
+     (into-array Object args))))
+
 (defn invoke
   "Calls f with args taken from the top of the stack. Arity sets the
   number of args to take from the stack. Throws an exception if there
@@ -157,7 +166,9 @@
   (let [s (str sym)]
     (cond
       (.startsWith s ".") `(invoke-instance-method (subs ~s 1))
-      (some #{\/} s) `(invoke-static-method ~s))))
+      (some #{\/} s) `(invoke-static-method ~s)
+      (.endsWith s ".") `(invoke-constructor (->> ~s butlast (apply str)))
+      :else (throw-error "Unknown symbol: %s" (str sym)))))
 
 (defn compile-invoke
   "Emits code for invoke>"
@@ -226,8 +237,9 @@
 (defn shift-loop-breaks
   "If a loop body contains an `if` that contains a 'break/continue' in
    one branch, move the rest of the body following the `if` into the
-   other branch, then recurse into that joined branch. Throws
-   exception if break/continue isn't in tail position"
+   other branch (since that code is only reachable when that branch is
+   chosen), then recurse into that joined branch. Throws exception if
+   break/continue isn't in tail position"
   [body]
   (let [[up-to-if [[_ & the-if] & remaining]] (split-with #(not (if? %)) body)]
     (if the-if
@@ -317,7 +329,7 @@
 (defn compile-list
   "Emits code for a list item (if or invoke)"
   [[function & args]]
-  (condp = function
+  (condp = (-> function name symbol) ;; strip namespace
     if-sym (compile-if args)
     invoke-sym (compile-invoke args)
     loop-sym (compile-loop args)
@@ -369,7 +381,7 @@
   the entire stack (helpful for debugging)."
   [name-sym initial-vars & program]
   (let [args-sym (gensym "args")]
-    `(defn ~name-sym [& ~args-sym]
+    `(defn ~(-> name-sym name symbol) [& ~args-sym]
        ~(stackfn-body args-sym initial-vars program))))
 
 (defmacro defstackfn
@@ -379,5 +391,5 @@
   the top stack item (or nil if empty)."
   [name-sym initial-vars & program]
   (let [args-sym (gensym "args")]
-    `(defn ~name-sym [& ~args-sym]
+    `(defn ~(-> name-sym name symbol) [& ~args-sym]
        (first ~(stackfn-body args-sym initial-vars program)))))
