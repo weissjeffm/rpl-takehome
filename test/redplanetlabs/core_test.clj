@@ -54,8 +54,6 @@
     )
   )
 
-
-
 (sut/defstackfn* nested-if [!y]
   !y !y
   (invoke> pos? 1)

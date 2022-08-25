@@ -659,8 +659,6 @@ sometimes trivial, but make compiled code more readable.
     )
   )
 
-
-
 (sut/defstackfn* nested-if [!y]
   !y !y
   (invoke> pos? 1)
