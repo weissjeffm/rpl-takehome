@@ -287,7 +287,7 @@
 (defn remove-ampersand
   "Removes the & from a list of values"
   [values]
-  (remove #(= % '&) values))
+  (vec (remove #(= % '&) values)))
 
 (defmacro threaded-fn
   "Expands from an expression that fits into the threading macro ->

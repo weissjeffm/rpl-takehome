@@ -143,9 +143,9 @@
   (call> 1 2 3 4))
 
 (sut/defstackfn* multiple-call [!x]
-  (fn> ([!y] !x !y (invoke> + 2)))
+  (fn> ([] 7) ([!y] !x !y (invoke> + 2)))
   !f+
-  (call> 4)
+  (call>)
   !f
   (call> 5))
 
@@ -177,7 +177,7 @@
   (is (= (closure) '(5 :yes :fnarg 4))))
 
 (deftest multiple-call-test
-  (is (= (multiple-call 11) '(16 15))))
+  (is (= (multiple-call 11) '(16 7))))
 
 (deftest varargs-test
   (is (= (varargs 12 19) '((2 3 4) 1))))

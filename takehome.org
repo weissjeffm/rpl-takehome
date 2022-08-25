@@ -442,7 +442,7 @@ sometimes trivial, but make compiled code more readable.
 (defn remove-ampersand
   "Removes the & from a list of values"
   [values]
-  (remove #(= % '&) values))
+  (vec (remove #(= % '&) values)))
 
 (defmacro threaded-fn
   "Expands from an expression that fits into the threading macro ->
@@ -748,9 +748,9 @@ sometimes trivial, but make compiled code more readable.
   (call> 1 2 3 4))
 
 (sut/defstackfn* multiple-call [!x]
-  (fn> ([!y] !x !y (invoke> + 2)))
+  (fn> ([] 7) ([!y] !x !y (invoke> + 2)))
   !f+
-  (call> 4)
+  (call>)
   !f
   (call> 5))
 
@@ -782,7 +782,7 @@ sometimes trivial, but make compiled code more readable.
   (is (= (closure) '(5 :yes :fnarg 4))))
 
 (deftest multiple-call-test
-  (is (= (multiple-call 11) '(16 15))))
+  (is (= (multiple-call 11) '(16 7))))
 
 (deftest varargs-test
   (is (= (varargs 12 19) '((2 3 4) 1))))
