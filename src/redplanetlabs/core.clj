@@ -26,10 +26,10 @@
 (def ^:dynamic *debug* false)
 
 (defmacro -debug>
-  "Optionally compile in debug statements to print state during each
-   step of execution. *debug* must be set to true before
-   macroexpansion, so can either redef it or eg (binding [*debug*
-   true] (eval '(defstackfn ...)))"
+  "Optionally, during compilation thread in (with ->) debug statements
+   to print state during each step of execution. *debug* must be set
+   to true before macroexpansion, so can either redef it or
+   eg (binding [*debug* true] (eval '(defstackfn ...)))"
   [& body]
   (let [body (if *debug*
                (interpose `debug body)
@@ -100,7 +100,7 @@
     (throw-error "Stack underflow")))
 
 (defn pop
-  "Drops the top item on the stack"
+  "Drops the top item from the stack"
   [state]
   (first (pop-item state)))
 
@@ -164,6 +164,7 @@
          (assoc state :stack))))
 
 (defn compile-java-interop
+  "Returns a form that invokes the given java method or constructor"
   [sym]
   (let [s (str sym)]
     (cond
