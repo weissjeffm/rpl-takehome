@@ -979,3 +979,6 @@ a list.
 - State "DONE"       from "INPROGRESS" [2022-08-25 Thu 11:46]
 **** DONE Fix debug macro
 - State "DONE"       from "TODO"       [2022-08-21 Sun 21:41]
+**** TODO Fix loop break within nested if
+The loop break behavior doesn't work when there is a break inside
+an if nested inside another if.
