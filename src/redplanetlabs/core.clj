@@ -217,7 +217,7 @@
   last, false if not present, and throws an exception if present but
   not last"
   [clause]
-  (let [kws #{'break> 'continue>}]
+  (let [kws #{break-sym continue-sym}]
     (if (some kws clause)
       (if (kws (last clause))
         true
@@ -234,7 +234,7 @@
   "Adds a loop continue if it's not already there"
   [body]
   (cond-> body
-    (-> body last (not= 'continue>)) (-> vec (conj 'continue>) list*)))
+    (-> body last (not= continue-sym)) (-> vec (conj continue-sym) list*)))
 
 (defn shift-loop-breaks
   "If a loop body contains an `if` that contains a 'break/continue' in
