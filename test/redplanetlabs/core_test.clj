@@ -120,13 +120,26 @@
    (invoke> dec 1) !x+ ;; dec and set x
    2 (invoke> > 2)))
 
+(sut/defstackfn* loop-nested-ifs [!inner !outer]
+  !inner !outer true
+  (loop>
+   (if>
+       (if> :a break>
+            else> :b)
+     :c
+     else>
+     (if> :e
+       else> :f break>)
+     :g)
+   :h false))
+
 (sut/defstackfn* closure []
   4 !x+
 
   (fn> ([!z] !x 4 (invoke> = 2)
         (if> !z :yes
              27 !x+ <pop> ;; change x to 27 in inner scope
-             else> :no))) 
+             else> :no)))
   5 !x+ <pop> ;; change x in outer scope
   (call> :fnarg)
 
@@ -169,7 +182,12 @@
   (is (= (loop-break1 7 '(7 6 5 4)))))
 
 (deftest nested-loop-test
-  (is (= (make-square 3) '([[1 2 3] [1 2 3] [1 2 3]]))))
+  (is (= (make-square 3) '([[1 2 3] [1 2 3] [1 2 3]])))
+  (are [inner outer result] (= (loop-nested-ifs inner outer) result)
+    true true '(:a)
+    true false '(:h :g :e)
+    false true '(:h :c :b)
+    false false '(:f)))
 
 (deftest lexical-closure-test
   (is (= (closure) '(5 :yes :fnarg 4))))

@@ -259,10 +259,18 @@ sometimes trivial, but make compiled code more readable.
   [state]
   (first (pop-item state)))
 
+(defn sym=
+  "Like = but also returns true if the items are two symbols whose
+  namespaces aren't the same but the base name is."
+  [x y]
+  (if (and (symbol? x) (symbol y))
+    (= (name x) (name y))
+    (= x y)))
+
 (defn compile-symbol
   "Emits code that handles symbols (variable get/set, pop)"
   [sym]
-  (condp = (-> sym name symbol) ;; remove namespacing
+  (condp sym= sym ;; remove namespacing
     pop-sym `(pop)
     continue-sym '(recur) ;; normalization guarantees this will be only
     ;; in the tail position
@@ -357,7 +365,7 @@ sometimes trivial, but make compiled code more readable.
 (defn split-if
   "Splits an if> body into a pair, [if-clause, else-clause]"
   [items]
-  (let [[if-clause [_ & else-clause]] (split-with #(not= % else-sym) items)]
+  (let [[if-clause [_ & else-clause]] (split-with #(not (sym= % else-sym)) items)]
     [if-clause else-clause]))
 
 (defn compile-if
@@ -367,12 +375,15 @@ sometimes trivial, but make compiled code more readable.
     `(threaded-if ~(map compile-item if-clause)
                   ~(map compile-item else-clause))))
 
+(declare shift-loop-breaks)
+
 (defn check-break-if-clause
   "Checks if the clause has break/continue. Returns true if it is
   last, false if not present, and throws an exception if present but
   not last"
   [clause]
-  (let [kws #{break-sym continue-sym}]
+  (let [kws #(or (sym= % break-sym)
+                 (sym= % continue-sym))]
     (if (some kws clause)
       (if (kws (last clause))
         true
@@ -383,7 +394,7 @@ sometimes trivial, but make compiled code more readable.
   "Returns true if the stack item is an if> expression"
   [item]
   (and (seq? item)
-       (-> item first (= if-sym))))
+       (-> item first (sym= if-sym))))
 
 (defn add-loop-continue
   "Adds a loop continue if it's not already there"
@@ -402,23 +413,18 @@ sometimes trivial, but make compiled code more readable.
     (if the-if
       (let [[if-clause else-clause :as clauses] (split-if the-if)
             [break-cont-if? break-cont-else?] (map check-break-if-clause clauses)]
-        ;; if there's a break or continue in exactly one branch
-        (if (not= break-cont-if? break-cont-else?) 
-          ;; do the shift
-          (list* (conj (vec up-to-if)
-                       (remove #{break-sym}
-                               (apply concat
-                                      [if-sym]
-                                      (if break-cont-if?
-                                        [if-clause [else-sym]
-                                         (shift-loop-breaks (concat else-clause remaining))]
-                                        [(shift-loop-breaks (concat if-clause remaining))
-                                         [else-sym] else-clause])))))
-          (if break-cont-if?
-            ;; break in both positions, nothing needs changing 
-            body
-            ;; neither has a break, default continue after
-            (add-loop-continue body))))
+        ;; do the shift
+        (list* (conj (vec up-to-if)
+                     (remove #(sym= % break-sym)
+                             (concat
+                              [if-sym]
+                              (if break-cont-if?
+                                if-clause
+                                (shift-loop-breaks (concat if-clause remaining)))
+                              [else-sym]
+                              (if break-cont-else?
+                                else-clause
+                                (shift-loop-breaks (concat else-clause remaining))))))))
       ;; no branch logic, continue by default
       (add-loop-continue body))))
 
@@ -486,7 +492,7 @@ sometimes trivial, but make compiled code more readable.
 (defn compile-list
   "Emits code for a list item (if or invoke)"
   [[function & args]]
-  (condp = (-> function name symbol) ;; strip namespace
+  (condp sym= function
     if-sym (compile-if args)
     invoke-sym (compile-invoke args)
     loop-sym (compile-loop args)
@@ -574,9 +580,11 @@ sometimes trivial, but make compiled code more readable.
 | #'redplanetlabs.core/get-var                |
 | #'redplanetlabs.core/pop-item               |
 | #'redplanetlabs.core/pop                    |
+| #'redplanetlabs.core/sym=                   |
 | #'redplanetlabs.core/compile-symbol         |
 | #'redplanetlabs.core/invoke-instance-method |
 | #'redplanetlabs.core/invoke-static-method   |
+| #'redplanetlabs.core/invoke-constructor     |
 | #'redplanetlabs.core/invoke                 |
 | #'redplanetlabs.core/compile-java-interop   |
 | #'redplanetlabs.core/compile-invoke         |
@@ -584,6 +592,7 @@ sometimes trivial, but make compiled code more readable.
 | #'redplanetlabs.core/compile-item           |
 | #'redplanetlabs.core/split-if               |
 | #'redplanetlabs.core/compile-if             |
+| #'redplanetlabs.core/shift-loop-breaks      |
 | #'redplanetlabs.core/check-break-if-clause  |
 | #'redplanetlabs.core/if?                    |
 | #'redplanetlabs.core/add-loop-continue      |
@@ -725,13 +734,26 @@ sometimes trivial, but make compiled code more readable.
    (invoke> dec 1) !x+ ;; dec and set x
    2 (invoke> > 2)))
 
+(sut/defstackfn* loop-nested-ifs [!inner !outer]
+  !inner !outer true
+  (loop>
+   (if>
+       (if> :a break>
+            else> :b)
+     :c
+     else>
+     (if> :e
+       else> :f break>)
+     :g)
+   :h false))
+
 (sut/defstackfn* closure []
   4 !x+
   ;; capture x as 4
   (fn> ([!z] !x 4 (invoke> = 2)
         (if> !z :yes
              27 !x+ <pop> ;; change x to 27 in inner scope
-             else> :no))) 
+             else> :no)))
   5 !x+ <pop> ;; change x in outer scope
   (call> :fnarg)
   ;; check that outer x is back after inner scope exits
@@ -774,7 +796,12 @@ sometimes trivial, but make compiled code more readable.
   (is (= (loop-break1 7 '(7 6 5 4)))))
 
 (deftest nested-loop-test
-  (is (= (make-square 3) '([[1 2 3] [1 2 3] [1 2 3]]))))
+  (is (= (make-square 3) '([[1 2 3] [1 2 3] [1 2 3]])))
+  (are [inner outer result] (= (loop-nested-ifs inner outer) result)
+    true true '(:a)
+    true false '(:h :g :e)
+    false true '(:h :c :b)
+    false false '(:f)))
 
 (deftest lexical-closure-test
   (is (= (closure) '(5 :yes :fnarg 4))))
@@ -886,6 +913,36 @@ Should we rewrite the stackish and then compile?
 #+end_src
 
 I think that is the way to go.
+***** Nested ifs
+#+begin_src clojure
+(loop> (if>
+           (if> a break>
+                 else> b)
+         c
+         else> d)
+       e)
+
+;;should translate to
+
+(loop []
+  (if tos
+    (if tos
+      a
+      (b ()))))
+
+(if>
+    (if> a
+      else> b c)
+  else> d)
+e
+
+
+(if> (if> a break>
+      else> b c)
+  else> d e)
+
+#+end_src
+
 **** Anonymous stack functions
 The basic idea here is to compile something like
 #+begin_src 

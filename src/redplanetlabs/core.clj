@@ -69,10 +69,10 @@
   "Returns the value of a variable or throws exception if it doesn't
   exist"
   [state v]
-  (-> state
-      :vars
-      (get v)
-      (or (throw-error "Variable does not exist: %s" (name v)))))
+  (let [value (-> state :vars (get v))]
+    (if (nil? value)
+      (throw-error "Variable does not exist: %s" (name v))
+      value)))
 
 (defn set-var
   "Sets the variable var with the value currently on top of
@@ -104,10 +104,18 @@
   [state]
   (first (pop-item state)))
 
+(defn sym=
+  "Like = but also returns true if the items are two symbols whose
+  namespaces aren't the same but the base name is."
+  [x y]
+  (if (and (symbol? x) (symbol y))
+    (= (name x) (name y))
+    (= x y)))
+
 (defn compile-symbol
   "Emits code that handles symbols (variable get/set, pop)"
   [sym]
-  (condp = (-> sym name symbol) ;; remove namespacing
+  (condp sym= sym ;; remove namespacing
     pop-sym `(pop)
     continue-sym '(recur) ;; normalization guarantees this will be only
 
@@ -202,7 +210,7 @@
 (defn split-if
   "Splits an if> body into a pair, [if-clause, else-clause]"
   [items]
-  (let [[if-clause [_ & else-clause]] (split-with #(not= % else-sym) items)]
+  (let [[if-clause [_ & else-clause]] (split-with #(not (sym= % else-sym)) items)]
     [if-clause else-clause]))
 
 (defn compile-if
@@ -212,12 +220,15 @@
     `(threaded-if ~(map compile-item if-clause)
                   ~(map compile-item else-clause))))
 
+(declare shift-loop-breaks)
+
 (defn check-break-if-clause
   "Checks if the clause has break/continue. Returns true if it is
   last, false if not present, and throws an exception if present but
   not last"
   [clause]
-  (let [kws #{break-sym continue-sym}]
+  (let [kws #(or (sym= % break-sym)
+                 (sym= % continue-sym))]
     (if (some kws clause)
       (if (kws (last clause))
         true
@@ -228,7 +239,7 @@
   "Returns true if the stack item is an if> expression"
   [item]
   (and (seq? item)
-       (-> item first (= if-sym))))
+       (-> item first (sym= if-sym))))
 
 (defn add-loop-continue
   "Adds a loop continue if it's not already there"
@@ -248,22 +259,17 @@
       (let [[if-clause else-clause :as clauses] (split-if the-if)
             [break-cont-if? break-cont-else?] (map check-break-if-clause clauses)]
 
-        (if (not= break-cont-if? break-cont-else?) 
-
-          (list* (conj (vec up-to-if)
-                       (remove #{break-sym}
-                               (apply concat
-                                      [if-sym]
-                                      (if break-cont-if?
-                                        [if-clause [else-sym]
-                                         (shift-loop-breaks (concat else-clause remaining))]
-                                        [(shift-loop-breaks (concat if-clause remaining))
-                                         [else-sym] else-clause])))))
-          (if break-cont-if?
-
-            body
-
-            (add-loop-continue body))))
+        (list* (conj (vec up-to-if)
+                     (remove #(sym= % break-sym)
+                             (concat
+                              [if-sym]
+                              (if break-cont-if?
+                                if-clause
+                                (shift-loop-breaks (concat if-clause remaining)))
+                              [else-sym]
+                              (if break-cont-else?
+                                else-clause
+                                (shift-loop-breaks (concat else-clause remaining))))))))
 
       (add-loop-continue body))))
 
@@ -331,7 +337,7 @@
 (defn compile-list
   "Emits code for a list item (if or invoke)"
   [[function & args]]
-  (condp = (-> function name symbol) ;; strip namespace
+  (condp sym= function
     if-sym (compile-if args)
     invoke-sym (compile-invoke args)
     loop-sym (compile-loop args)
