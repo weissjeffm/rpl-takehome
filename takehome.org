@@ -224,10 +224,10 @@ sometimes trivial, but make compiled code more readable.
   "Returns the value of a variable or throws exception if it doesn't
   exist"
   [state v]
-  (-> state
-      :vars
-      (get v)
-      (or (throw-error "Variable does not exist: %s" (name v)))))
+  (let [value (-> state :vars (get v))]
+    (if (nil? value)
+      (throw-error "Variable does not exist: %s" (name v))
+      value)))
 
 (defn set-var
   "Sets the variable var with the value currently on top of
@@ -983,3 +983,6 @@ a list.
 - State "INPROGRESS" from "TODO"       [2022-08-27 Sat 21:13]
 The loop break behavior doesn't work when there is a break inside
 an if nested inside another if.
+**** DONE Variables set to false act as if they are unset
+- State "DONE"       from "INPROGRESS" [2022-08-27 Sat 21:47]
+- State "INPROGRESS" from "TODO"       [2022-08-27 Sat 21:38]
