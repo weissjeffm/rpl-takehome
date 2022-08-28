@@ -120,7 +120,7 @@
    (invoke> dec 1) !x+ ;; dec and set x
    2 (invoke> > 2)))
 
-(sut/defstackfn* loop-nested-ifs [!inner !outer]
+(sut/defstackfn* loop-nested-ifs-break [!inner !outer]
   !inner !outer true
   (loop>
    (if>
@@ -130,6 +130,19 @@
      else>
      (if> :e
        else> :f break>)
+     :g)
+   :h false))
+
+(sut/defstackfn* loop-nested-ifs-continue [!inner !outer]
+  !inner !outer true
+  (loop>
+   (if>
+       (if> :a false false true continue> ;; take f path to lower continue
+            else> :b)
+     :c
+     else>
+     (if> :e
+       else> :f false true true continue>) ;; take b path
      :g)
    :h false))
 
@@ -183,11 +196,16 @@
 
 (deftest nested-loop-test
   (is (= (make-square 3) '([[1 2 3] [1 2 3] [1 2 3]])))
-  (are [inner outer result] (= (loop-nested-ifs inner outer) result)
+  (are [inner outer result] (= (loop-nested-ifs-break inner outer) result)
     true true '(:a)
     true false '(:h :g :e)
     false true '(:h :c :b)
-    false false '(:f)))
+    false false '(:f))
+  (are [inner outer result] (= (loop-nested-ifs-continue inner outer) result)
+    true true '(:h :c :b :f :a)
+    true false '(:h :g :e)
+    false true '(:h :c :b)
+    false false '(:h :c :b :f)))
 
 (deftest lexical-closure-test
   (is (= (closure) '(5 :yes :fnarg 4))))
