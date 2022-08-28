@@ -173,6 +173,18 @@
   !f
   (call> 5))
 
+(sut/defstackfn* common-fns [!a !b !c]
+  (fn> ([] !x+ <pop> !y+ <pop> !x !y)) !swap+
+  <pop>
+  (fn> ([] !x+ !x)) !dup+
+  <pop>
+  (fn> ([] !swap (call>) !x+ <pop> (call>) !x)) !dip+
+  <pop>
+  !a !b !c
+  (fn> ([] (invoke> inc 1)))
+  !dip (call>)
+  !dup (call>))
+
 (sut/defstackfn* java [!x !y]
   !x (invoke> Math/abs 1) (invoke> .toString 1) !y (invoke> .contains 2)
   (invoke> String. 0) (invoke> .length 1) 0 (invoke> = 2))
@@ -212,6 +224,9 @@
 
 (deftest multiple-call-test
   (is (= (multiple-call 11) '(16 7))))
+
+(deftest common-fns-test
+  (is (= (common-fns 11 14 17) '(17 17 15 11))))
 
 (deftest varargs-test
   (is (= (varargs 12 19) '((2 3 4) 1))))
